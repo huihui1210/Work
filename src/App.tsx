@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { bitable } from '@lark-base-open/js-sdk';
 import { ExportError, cellToText, getSelectionInfo, getSelectedData } from './bitable-helper';
 import type { SelectionInfo } from './bitable-helper';
-import { buildFileBlob, buildFilename, copyToClipboard, downloadBlob } from './exporter';
+import { buildFileBlob, buildFilename, downloadBlob } from './exporter';
 import type { ExportFormat } from './exporter';
 import * as LZString from 'lz-string';
 import './styles.css';
@@ -22,8 +22,6 @@ const DMS_MAX_PAYLOAD_CHARS = 1_500_000;
 const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
   { value: 'csv', label: 'CSV', desc: '.csv 通用' },
-  { value: 'json', label: 'JSON', desc: '.json 数据' },
-  { value: 'clipboard', label: '剪贴板', desc: '直接粘贴' },
   { value: 'dms', label: '缺陷系统', desc: '一键发送' },
 ];
 
@@ -126,12 +124,6 @@ export default function App() {
         return;
       }
 
-      if (format === 'clipboard') {
-        await copyToClipboard(data.columns, data.rows);
-        setMessage({ type: 'success', text: `已复制 ${data.rows.length} 条记录，可直接粘贴到 Excel。` });
-        return;
-      }
-
       const ext = format;
       const blob = buildFileBlob(format, data.columns, data.rows, data.viewName);
       downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, ext));
@@ -150,7 +142,7 @@ export default function App() {
         <div className="header-icon">⇩</div>
         <div>
           <h1>一键导出选中内容</h1>
-          <p className="subtitle">勾选记录，导出为 Excel / CSV / JSON</p>
+          <p className="subtitle">勾选记录，导出为 Excel / CSV</p>
         </div>
       </header>
 
@@ -199,11 +191,9 @@ export default function App() {
       <button type="button" className="primary-btn" disabled={exporting} onClick={() => void handleExport()}>
         {exporting
           ? '处理中…'
-          : format === 'clipboard'
-            ? '一键复制到剪贴板'
-            : format === 'dms'
-              ? '一键发送到缺陷系统'
-              : '一键导出'}
+          : format === 'dms'
+            ? '一键发送到缺陷系统'
+            : '一键导出'}
       </button>
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
