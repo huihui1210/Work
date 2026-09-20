@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { bitable } from '@lark-base-open/js-sdk';
-import { ExportError, getSelectionInfo, getSelectedData } from './bitable-helper';
+import { ExportError, cellToText, getSelectionInfo, getSelectedData } from './bitable-helper';
 import type { SelectionInfo } from './bitable-helper';
 import { buildFileBlob, buildFilename, copyToClipboard, downloadBlob } from './exporter';
 import type { ExportFormat } from './exporter';
 import './styles.css';
 
+type AppFormat = ExportFormat | 'dms';
+
 interface FormatOption {
-  value: ExportFormat;
+  value: AppFormat;
   label: string;
   desc: string;
 }
+
+const DMS_URL = 'https://huihui1210.github.io/DMS_DA/';
+const DMS_TARGET_ORIGIN = 'https://huihui1210.github.io';
+const DMS_HANDSHAKE_TIMEOUT = 20000;
 
 const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
   { value: 'csv', label: 'CSV', desc: '.csv 通用' },
   { value: 'json', label: 'JSON', desc: '.json 数据' },
   { value: 'clipboard', label: '剪贴板', desc: '直接粘贴' },
+  { value: 'dms', label: '缺陷系统', desc: '一键发送' },
 ];
 
 type MessageType = 'success' | 'error' | 'info';
@@ -25,7 +32,7 @@ export default function App() {
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [checking, setChecking] = useState(true);
   const [notInHost, setNotInHost] = useState(false);
-  const [format, setFormat] = useState<ExportFormat>('xlsx');
+  const [format, setFormat] = useState<AppFormat>('xlsx');
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
 
@@ -60,10 +67,46 @@ export default function App() {
   const handleExport = async () => {
     setExporting(true);
     setMessage(null);
+    // 发送到缺陷系统时，必须在任何 await 之前同步打开窗口，否则会被弹窗拦截
+    let dmsWindow: Window | null = null;
+    if (format === 'dms') {
+      dmsWindow = window.open(DMS_URL, '_blank');
+    }
     try {
       const data = await getSelectedData();
       if (data.rows.length === 0) {
         setMessage({ type: 'info', text: '请先在表格视图中勾选要导出的记录。' });
+        return;
+      }
+
+      if (format === 'dms') {
+        if (!dmsWindow) {
+          setMessage({
+            type: 'error',
+            text: '浏览器拦截了弹窗。请允许本页面弹出窗口后重试，或改用 Excel 导出后手动导入。',
+          });
+          return;
+        }
+        const payloadRows = data.rows.map((record) => {
+          const obj: Record<string, string> = {};
+          for (const column of data.columns) {
+            obj[column.name] = cellToText(record.fields[column.id] ?? null, column.type);
+          }
+          return obj;
+        });
+        try {
+          const count = await sendToDMS(dmsWindow, payloadRows);
+          setMessage({ type: 'success', text: `已发送 ${count} 条记录到缺陷管理系统，请在新标签页查看。` });
+          void refresh();
+        } catch (error) {
+          setMessage({
+            type: 'error',
+            text:
+              (error as Error).message === 'TIMEOUT'
+                ? '缺陷系统未在 20 秒内完成接收，请确认新标签页已正常打开；也可改用 Excel 导出后手动导入。'
+                : `发送失败：${(error as Error).message}`,
+          });
+        }
         return;
       }
 
@@ -138,7 +181,13 @@ export default function App() {
       </section>
 
       <button type="button" className="primary-btn" disabled={exporting} onClick={() => void handleExport()}>
-        {exporting ? '导出中…' : format === 'clipboard' ? '一键复制到剪贴板' : '一键导出'}
+        {exporting
+          ? '处理中…'
+          : format === 'clipboard'
+            ? '一键复制到剪贴板'
+            : format === 'dms'
+              ? '一键发送到缺陷系统'
+              : '一键导出'}
       </button>
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
@@ -148,6 +197,58 @@ export default function App() {
       </p>
     </div>
   );
+}
+
+/**
+ * 与缺陷管理系统握手并发送数据：
+ * 周期性 ping → 目标系统回复 ready → 发送 import → 等待 imported 回执
+ */
+function sendToDMS(target: Window, rows: Record<string, string>[]): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const pingTimer = window.setInterval(() => {
+      try {
+        target.postMessage({ source: 'bitable-export-plugin', type: 'ping' }, DMS_TARGET_ORIGIN);
+      } catch {
+        // 目标窗口可能已关闭
+      }
+    }, 500);
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== DMS_TARGET_ORIGIN) return;
+      const data = event.data as
+        | { source?: string; type?: 'ready' | 'imported' | 'error'; count?: number; message?: string }
+        | null;
+      if (!data || data.source !== 'dms-da') return;
+
+      if (data.type === 'ready') {
+        target.postMessage({ source: 'bitable-export-plugin', type: 'import', rows }, DMS_TARGET_ORIGIN);
+      } else if (data.type === 'imported') {
+        finish(null, data.count ?? rows.length);
+      } else if (data.type === 'error') {
+        finish(new Error(data.message ?? '目标系统处理失败'), 0);
+      }
+    };
+
+    const timeoutTimer = window.setTimeout(() => finish(new Error('TIMEOUT'), 0), DMS_HANDSHAKE_TIMEOUT);
+    window.addEventListener('message', onMessage);
+
+    function finish(error: Error | null, count: number) {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(pingTimer);
+      window.clearTimeout(timeoutTimer);
+      window.removeEventListener('message', onMessage);
+      if (error) reject(error);
+      else resolve(count);
+    }
+
+    try {
+      target.postMessage({ source: 'bitable-export-plugin', type: 'ping' }, DMS_TARGET_ORIGIN);
+    } catch (error) {
+      finish(error as Error, 0);
+    }
+  });
 }
 
 function errorToMessage(error: unknown): string {
