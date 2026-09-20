@@ -36,9 +36,15 @@ export default function App() {
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
 
   const refreshingRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const debounceTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
-    if (refreshingRef.current) return;
+    // 刷新进行中不丢弃请求，标记后排队补刷一次
+    if (refreshingRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
     refreshingRef.current = true;
     try {
       const info = await getSelectionInfo();
@@ -49,19 +55,36 @@ export default function App() {
     } finally {
       refreshingRef.current = false;
       setChecking(false);
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        void refresh();
+      }
     }
   }, []);
+
+  // 勾选变化后短暂等待 SDK 内部状态更新，再读取数量（连续勾选只刷最后一次）
+  const scheduleRefresh = useCallback(() => {
+    if (debounceTimerRef.current) {
+      window.clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = window.setTimeout(() => void refresh(), 200);
+  }, [refresh]);
 
   useEffect(() => {
     void refresh();
     let unsubscribe: () => void = () => undefined;
     try {
-      unsubscribe = bitable.base.onSelectionChange(() => void refresh());
+      unsubscribe = bitable.base.onSelectionChange(() => scheduleRefresh());
     } catch {
       // 非多维表格环境时忽略
     }
-    return unsubscribe;
-  }, [refresh]);
+    return () => {
+      unsubscribe();
+      if (debounceTimerRef.current) {
+        window.clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [refresh, scheduleRefresh]);
 
   const handleExport = async () => {
     setExporting(true);
