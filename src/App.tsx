@@ -37,9 +37,9 @@ export default function App() {
 
   const refreshingRef = useRef(false);
   const pendingRefreshRef = useRef(false);
-  const debounceTimerRef = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
+  /** silent=true 时为后台轮询：不切换 loading/警告状态，仅在结果变化时更新界面 */
+  const refresh = useCallback(async (silent = false) => {
     // 刷新进行中不丢弃请求，标记后排队补刷一次
     if (refreshingRef.current) {
       pendingRefreshRef.current = true;
@@ -48,13 +48,13 @@ export default function App() {
     refreshingRef.current = true;
     try {
       const info = await getSelectionInfo();
-      setSelection(info);
-      setNotInHost(false);
+      setSelection((prev) => (isSameSelection(prev, info) ? prev : info));
+      if (!silent) setNotInHost(false);
     } catch (error) {
-      setNotInHost(window.top === window || error instanceof ExportError);
+      if (!silent) setNotInHost(window.top === window || error instanceof ExportError);
     } finally {
       refreshingRef.current = false;
-      setChecking(false);
+      if (!silent) setChecking(false);
       if (pendingRefreshRef.current) {
         pendingRefreshRef.current = false;
         void refresh();
@@ -62,29 +62,22 @@ export default function App() {
     }
   }, []);
 
-  // 勾选变化后短暂等待 SDK 内部状态更新，再读取数量（连续勾选只刷最后一次）
-  const scheduleRefresh = useCallback(() => {
-    if (debounceTimerRef.current) {
-      window.clearTimeout(debounceTimerRef.current);
-    }
-    debounceTimerRef.current = window.setTimeout(() => void refresh(), 200);
-  }, [refresh]);
-
   useEffect(() => {
     void refresh();
     let unsubscribe: () => void = () => undefined;
     try {
-      unsubscribe = bitable.base.onSelectionChange(() => scheduleRefresh());
+      // 事件能触发时立即响应；若宿主对勾选不抛事件，由下面的定时轮询兜底
+      unsubscribe = bitable.base.onSelectionChange(() => void refresh());
     } catch {
       // 非多维表格环境时忽略
     }
+    // 定时静默轮询：勾选事件在部分宿主场景下不触发，轮询保证数量在 1 秒内自动同步
+    const pollTimer = window.setInterval(() => void refresh(true), 800);
     return () => {
       unsubscribe();
-      if (debounceTimerRef.current) {
-        window.clearTimeout(debounceTimerRef.current);
-      }
+      window.clearInterval(pollTimer);
     };
-  }, [refresh, scheduleRefresh]);
+  }, [refresh]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -225,6 +218,17 @@ export default function App() {
         使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
     </div>
+  );
+}
+
+/** 判断两次读取的选中状态是否一致，避免轮询造成无谓的界面刷新 */
+function isSameSelection(a: SelectionInfo | null, b: SelectionInfo): boolean {
+  return (
+    !!a &&
+    a.count === b.count &&
+    a.tableName === b.tableName &&
+    a.viewName === b.viewName &&
+    a.multiSelectSupported === b.multiSelectSupported
   );
 }
 
