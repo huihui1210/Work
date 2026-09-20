@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { bitable } from '@lark-base-open/js-sdk';
-import { ExportError, cellToText, getSelectionInfo, getSelectedData } from './bitable-helper';
+import {
+  ExportError,
+  cellToText,
+  getAttachmentMap,
+  getSelectionInfo,
+  getSelectedData,
+} from './bitable-helper';
 import type { SelectionInfo } from './bitable-helper';
-import { buildFileBlob, buildFilename, downloadBlob } from './exporter';
+import { buildFileBlob, buildFilename, downloadBlob, exportXlsxWithImages } from './exporter';
 import type { ExportFormat } from './exporter';
 import * as LZString from 'lz-string';
 import { buildWorkOrderPdfBlob } from './work-order-pdf';
@@ -24,7 +30,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
   { value: 'csv', label: 'CSV', desc: '.csv 通用' },
   { value: 'pdf', label: '工单PDF', desc: '缺陷处理工单' },
-  { value: 'dms', label: '缺陷系统', desc: '一键发送' },
+  { value: 'dms', label: '缺陷分析', desc: '一键发送' },
 ];
 
 type MessageType = 'success' | 'error' | 'info';
@@ -156,9 +162,32 @@ export default function App() {
         return;
       }
 
-      const ext = format;
+      if (format === 'xlsx') {
+        setMessage({ type: 'info', text: '正在读取缺陷图片…' });
+        const attachmentMap = await getAttachmentMap(data.columns, data.rows);
+        const blob = await exportXlsxWithImages(
+          data.columns,
+          data.rows,
+          attachmentMap,
+          data.viewName,
+          (done, total) =>
+            setMessage(
+              total
+                ? { type: 'info', text: `正在下载缺陷图片（${done}/${total}）…` }
+                : { type: 'info', text: '正在生成 Excel…' },
+            ),
+        );
+        downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
+        setMessage({
+          type: 'success',
+          text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
+        });
+        void refresh();
+        return;
+      }
+
       const blob = buildFileBlob(format, data.columns, data.rows, data.viewName);
-      downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, ext));
+      downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, format));
       setMessage({ type: 'success', text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列）。` });
       void refresh();
     } catch (error) {
@@ -224,7 +253,7 @@ export default function App() {
         {exporting
           ? '处理中…'
           : format === 'dms'
-            ? '一键发送到缺陷系统'
+            ? '一键发送到缺陷分析'
             : format === 'pdf'
               ? '一键导出工单PDF'
               : '一键导出'}

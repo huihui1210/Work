@@ -106,6 +106,70 @@ export async function getSelectedData(): Promise<ExportData> {
   return { columns, rows, tableName, viewName };
 }
 
+interface RawAttachment {
+  name: string;
+  size: number;
+  token: string;
+}
+
+export interface AttachmentInfo {
+  name: string;
+  url: string;
+}
+
+/** fieldId -> recordId -> 该单元格的附件信息 */
+export type AttachmentMap = Record<string, Record<string, AttachmentInfo[]>>;
+
+function extractAttachments(value: unknown): RawAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is RawAttachment =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof (item as RawAttachment).token === 'string' &&
+      typeof (item as RawAttachment).size === 'number',
+  );
+}
+
+/**
+ * 收集所有附件单元格的可下载 URL（用于 Excel 内嵌图片）
+ */
+export async function getAttachmentMap(
+  columns: ExportColumn[],
+  rows: IRecord[],
+): Promise<AttachmentMap> {
+  const attachmentColumns = columns.filter((col) => col.type === FieldType.Attachment);
+  if (attachmentColumns.length === 0 || rows.length === 0) return {};
+
+  const selection = await bitable.base.getSelection();
+  if (!selection.tableId) return {};
+  const table = await bitable.base.getTableById(selection.tableId);
+
+  const result: AttachmentMap = {};
+  for (const col of attachmentColumns) {
+    const perRecord: Record<string, AttachmentInfo[]> = {};
+    for (const record of rows) {
+      const attachments = extractAttachments(record.fields[col.id]);
+      if (attachments.length === 0) continue;
+      try {
+        const urls = await table.getCellAttachmentUrls(
+          attachments.map((item) => item.token),
+          col.id,
+          record.recordId,
+        );
+        perRecord[record.recordId] = urls.map((url, index) => ({
+          name: attachments[index]?.name ?? `图片${index + 1}`,
+          url,
+        }));
+      } catch {
+        // 单格取 URL 失败时忽略，导出时该格降级为文件名文本
+      }
+    }
+    result[col.id] = perRecord;
+  }
+  return result;
+}
+
 const SEGMENT_TYPES = new Set(['text', 'url', 'mention']);
 const DATE_FIELD_TYPES = new Set<FieldType>([
   FieldType.DateTime,
