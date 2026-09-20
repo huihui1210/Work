@@ -1,0 +1,25 @@
+{
+  "name": "bitable-export-selection",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "多维表格边栏插件：一键导出选中的记录（Excel / CSV / JSON / 剪贴板）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lark-base-open/js-sdk": "^1.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.8"
+  }
+}
