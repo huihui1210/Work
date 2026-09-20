@@ -70,7 +70,8 @@ export default function App() {
     // 发送到缺陷系统时，必须在任何 await 之前同步打开窗口，否则会被弹窗拦截
     let dmsWindow: Window | null = null;
     if (format === 'dms') {
-      dmsWindow = window.open(DMS_URL, '_blank');
+      // 加时间戳防止浏览器打开缓存的旧版 DMS
+      dmsWindow = window.open(`${DMS_URL}?t=${Date.now()}`, '_blank');
     }
     try {
       const data = await getSelectedData();
@@ -200,19 +201,21 @@ export default function App() {
 }
 
 /**
- * 与缺陷管理系统握手并发送数据：
- * 周期性 ping → 目标系统回复 ready → 发送 import → 等待 imported 回执
+ * 与缺陷管理系统发送数据（不依赖 window.opener 方向的握手）：
+ * 周期性直接发送 import，直到对方回执 imported；ready / ping 仅用于提前触发。
  */
 function sendToDMS(target: Window, rows: Record<string, string>[]): Promise<number> {
   return new Promise((resolve, reject) => {
     let settled = false;
-    const pingTimer = window.setInterval(() => {
+
+    const pushImport = () => {
       try {
-        target.postMessage({ source: 'bitable-export-plugin', type: 'ping' }, DMS_TARGET_ORIGIN);
+        target.postMessage({ source: 'bitable-export-plugin', type: 'import', rows }, DMS_TARGET_ORIGIN);
       } catch {
         // 目标窗口可能已关闭
       }
-    }, 500);
+    };
+    const pushTimer = window.setInterval(pushImport, 500);
 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== DMS_TARGET_ORIGIN) return;
@@ -222,7 +225,7 @@ function sendToDMS(target: Window, rows: Record<string, string>[]): Promise<numb
       if (!data || data.source !== 'dms-da') return;
 
       if (data.type === 'ready') {
-        target.postMessage({ source: 'bitable-export-plugin', type: 'import', rows }, DMS_TARGET_ORIGIN);
+        pushImport();
       } else if (data.type === 'imported') {
         finish(null, data.count ?? rows.length);
       } else if (data.type === 'error') {
@@ -232,21 +235,16 @@ function sendToDMS(target: Window, rows: Record<string, string>[]): Promise<numb
 
     const timeoutTimer = window.setTimeout(() => finish(new Error('TIMEOUT'), 0), DMS_HANDSHAKE_TIMEOUT);
     window.addEventListener('message', onMessage);
+    pushImport();
 
     function finish(error: Error | null, count: number) {
       if (settled) return;
       settled = true;
-      window.clearInterval(pingTimer);
+      window.clearInterval(pushTimer);
       window.clearTimeout(timeoutTimer);
       window.removeEventListener('message', onMessage);
       if (error) reject(error);
       else resolve(count);
-    }
-
-    try {
-      target.postMessage({ source: 'bitable-export-plugin', type: 'ping' }, DMS_TARGET_ORIGIN);
-    } catch (error) {
-      finish(error as Error, 0);
     }
   });
 }
