@@ -4,6 +4,7 @@ import { ExportError, cellToText, getSelectionInfo, getSelectedData } from './bi
 import type { SelectionInfo } from './bitable-helper';
 import { buildFileBlob, buildFilename, copyToClipboard, downloadBlob } from './exporter';
 import type { ExportFormat } from './exporter';
+import * as LZString from 'lz-string';
 import './styles.css';
 
 type AppFormat = ExportFormat | 'dms';
@@ -15,8 +16,8 @@ interface FormatOption {
 }
 
 const DMS_URL = 'https://huihui1210.github.io/DMS_DA/';
-const DMS_TARGET_ORIGIN = 'https://huihui1210.github.io';
-const DMS_HANDSHAKE_TIMEOUT = 20000;
+/** 压缩后锚点的安全长度上限，超出则退回 Excel 下载 */
+const DMS_MAX_PAYLOAD_CHARS = 1_500_000;
 
 const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
@@ -70,8 +71,7 @@ export default function App() {
     // 发送到缺陷系统时，必须在任何 await 之前同步打开窗口，否则会被弹窗拦截
     let dmsWindow: Window | null = null;
     if (format === 'dms') {
-      // 加时间戳防止浏览器打开缓存的旧版 DMS
-      dmsWindow = window.open(`${DMS_URL}?t=${Date.now()}`, '_blank');
+      dmsWindow = window.open(DMS_URL, '_blank');
     }
     try {
       const data = await getSelectedData();
@@ -95,17 +95,32 @@ export default function App() {
           }
           return obj;
         });
+        const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payloadRows));
+
+        if (compressed.length > DMS_MAX_PAYLOAD_CHARS) {
+          const blob = buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
+          setMessage({
+            type: 'info',
+            text: `勾选数据较多（${data.rows.length} 条），已自动改为下载 Excel，请在缺陷系统中手动导入该文件。`,
+          });
+          return;
+        }
+
         try {
-          const count = await sendToDMS(dmsWindow, payloadRows);
-          setMessage({ type: 'success', text: `已发送 ${count} 条记录到缺陷管理系统，请在新标签页查看。` });
+          // 带数据锚点重新导航，DMS 加载时自动读取导入（沙箱无法拦截页面导航）
+          dmsWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+          setMessage({
+            type: 'success',
+            text: `已发送 ${data.rows.length} 条记录到缺陷管理系统，请查看新标签页。`,
+          });
           void refresh();
-        } catch (error) {
+        } catch {
+          const blob = buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'error',
-            text:
-              (error as Error).message === 'TIMEOUT'
-                ? '缺陷系统未在 20 秒内完成接收，请确认新标签页已正常打开；也可改用 Excel 导出后手动导入。'
-                : `发送失败：${(error as Error).message}`,
+            text: '无法自动打开缺陷系统，已改为下载 Excel，请手动导入。',
           });
         }
         return;
@@ -198,55 +213,6 @@ export default function App() {
       </p>
     </div>
   );
-}
-
-/**
- * 与缺陷管理系统发送数据（不依赖 window.opener 方向的握手）：
- * 周期性直接发送 import，直到对方回执 imported；ready / ping 仅用于提前触发。
- */
-function sendToDMS(target: Window, rows: Record<string, string>[]): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-
-    const pushImport = () => {
-      try {
-        target.postMessage({ source: 'bitable-export-plugin', type: 'import', rows }, DMS_TARGET_ORIGIN);
-      } catch {
-        // 目标窗口可能已关闭
-      }
-    };
-    const pushTimer = window.setInterval(pushImport, 500);
-
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== DMS_TARGET_ORIGIN) return;
-      const data = event.data as
-        | { source?: string; type?: 'ready' | 'imported' | 'error'; count?: number; message?: string }
-        | null;
-      if (!data || data.source !== 'dms-da') return;
-
-      if (data.type === 'ready') {
-        pushImport();
-      } else if (data.type === 'imported') {
-        finish(null, data.count ?? rows.length);
-      } else if (data.type === 'error') {
-        finish(new Error(data.message ?? '目标系统处理失败'), 0);
-      }
-    };
-
-    const timeoutTimer = window.setTimeout(() => finish(new Error('TIMEOUT'), 0), DMS_HANDSHAKE_TIMEOUT);
-    window.addEventListener('message', onMessage);
-    pushImport();
-
-    function finish(error: Error | null, count: number) {
-      if (settled) return;
-      settled = true;
-      window.clearInterval(pushTimer);
-      window.clearTimeout(timeoutTimer);
-      window.removeEventListener('message', onMessage);
-      if (error) reject(error);
-      else resolve(count);
-    }
-  });
 }
 
 function errorToMessage(error: unknown): string {
