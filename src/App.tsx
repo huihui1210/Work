@@ -5,9 +5,10 @@ import type { SelectionInfo } from './bitable-helper';
 import { buildFileBlob, buildFilename, downloadBlob } from './exporter';
 import type { ExportFormat } from './exporter';
 import * as LZString from 'lz-string';
+import { buildWorkOrderPdfBlob } from './work-order-pdf';
 import './styles.css';
 
-type AppFormat = ExportFormat | 'dms';
+type AppFormat = ExportFormat | 'dms' | 'pdf';
 
 interface FormatOption {
   value: AppFormat;
@@ -22,6 +23,7 @@ const DMS_MAX_PAYLOAD_CHARS = 1_500_000;
 const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
   { value: 'csv', label: 'CSV', desc: '.csv 通用' },
+  { value: 'pdf', label: '工单PDF', desc: '缺陷处理工单' },
   { value: 'dms', label: '缺陷系统', desc: '一键发送' },
 ];
 
@@ -140,6 +142,20 @@ export default function App() {
         return;
       }
 
+      if (format === 'pdf') {
+        setMessage({ type: 'info', text: '正在生成工单 PDF…' });
+        const blob = await buildWorkOrderPdfBlob(data.columns, data.rows, (done, total) => {
+          setMessage({ type: 'info', text: `正在生成工单 PDF（${done}/${total} 页）…` });
+        });
+        downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'pdf'));
+        setMessage({
+          type: 'success',
+          text: `已生成 ${data.rows.length} 张缺陷处理工单 PDF（按缺陷编号排序）。`,
+        });
+        void refresh();
+        return;
+      }
+
       const ext = format;
       const blob = buildFileBlob(format, data.columns, data.rows, data.viewName);
       downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, ext));
@@ -158,7 +174,7 @@ export default function App() {
         <div className="header-icon">⇩</div>
         <div>
           <h1>一键导出选中内容</h1>
-          <p className="subtitle">勾选记录，导出为 Excel / CSV</p>
+          <p className="subtitle">勾选记录，导出为 Excel / CSV / 工单PDF</p>
         </div>
       </header>
 
@@ -209,7 +225,9 @@ export default function App() {
           ? '处理中…'
           : format === 'dms'
             ? '一键发送到缺陷系统'
-            : '一键导出'}
+            : format === 'pdf'
+              ? '一键导出工单PDF'
+              : '一键导出'}
       </button>
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
