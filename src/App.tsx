@@ -151,7 +151,9 @@ export default function App() {
 
       if (format === 'pdf') {
         setMessage({ type: 'info', text: '正在生成工单 PDF…' });
-        const blob = await buildWorkOrderPdfBlob(data.columns, data.rows, (done, total) => {
+        // 工单不包含缺陷图片：过滤附件列
+        const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
+        const blob = await buildWorkOrderPdfBlob(columns, data.rows, (done, total) => {
           setMessage({ type: 'info', text: `正在生成工单 PDF（${done}/${total} 页）…` });
         });
         downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'pdf'));
