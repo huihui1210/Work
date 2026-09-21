@@ -31,6 +31,9 @@ const FIELD_DEFS: FieldDef[] = [
   { key: 'partyMember', match: ['党员责任人'], exact: true },
   { key: 'manager', match: ['负责人'], exact: true },
   { key: 'handler', match: ['处理人'], exact: true },
+  { key: 'dept', match: ['责任部门'] },
+  { key: 'specialty', match: ['专业'], exact: true },
+  { key: 'risk', match: ['风险控制措施', '风险措施', '安全措施'] },
   { key: 'repairer', match: ['消缺人'] },
   { key: 'leader', match: ['班长', '班组长'] },
   { key: 'closeTime', match: ['消项时间', '消缺完成日期', '完成日期', '消缺时间', '完成时间', '关闭时间'] },
@@ -147,14 +150,14 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
-/** 标签-值对行：多个字段并排一行，无值的字段不显示；全部无值时返回 null */
-function pairRow(pairs: { label: string; value: string }[]): HTMLElement | null {
-  const filtered = pairs.filter((pair) => pair.value);
+/** 标签-值对行：多个字段并排一行；默认无值的字段不显示（keepEmpty 可强制保留），全部为空时返回 null */
+function pairRow(pairs: { label: string; value: string; keepEmpty?: boolean }[]): HTMLElement | null {
+  const filtered = pairs.filter((pair) => pair.value || pair.keepEmpty);
   if (!filtered.length) return null;
   const row = h('div', 'wo-row');
   filtered.forEach((pair, idx) => {
     row.append(h('div', 'wo-label wo-pair-label', pair.label));
-    const value = h('div', 'wo-value', pair.value);
+    const value = h('div', 'wo-value', pair.value || '　');
     if (idx < filtered.length - 1) value.classList.add('wo-bordered');
     row.append(value);
   });
@@ -200,7 +203,8 @@ function renderOrder(
   const defectNo = get('defectNo');
   const discoverDate = parseDiscoverDate(defectNo);
 
-  // 标题 + 顶部信息（发现时间 / 编号，存在才显示）
+  // 公司抬头 + 标题 + 顶部信息（发现时间 / 编号，存在才显示）
+  order.append(h('div', 'wo-company', '福建LNG接收站'));
   order.append(h('div', 'wo-title', '设备缺陷处理工单'));
   const topMeta = h('div', 'wo-topmeta');
   if (discoverDate) topMeta.append(h('span', undefined, `发现时间：${discoverDate}`));
@@ -220,11 +224,20 @@ function renderOrder(
     ]),
   );
 
-  // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格
+  // 部门与专业：一行
+  appendIf(
+    table,
+    pairRow([
+      { label: '责任部门', value: get('dept') },
+      { label: '专业', value: get('specialty') },
+    ]),
+  );
+
+  // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格（左对齐、垂直居中）
   const descPartIds: string[] = JSON.parse(fieldIds.descPartIds ?? '[]');
   const parts = descPartIds.map((id) => row[id] ?? '').filter(Boolean);
   const descText = [parts.join(' / '), get('desc')].filter(Boolean).join('\n');
-  appendIf(table, fieldRow('缺陷描述', descText, 'wo-desc-value wo-left'));
+  appendIf(table, fieldRow('缺陷描述', descText, 'wo-desc-value'));
 
   // 日期：计划期限 / 消项时间（只到日）
   appendIf(
@@ -259,11 +272,19 @@ function renderOrder(
     ),
   );
 
-  // 消缺处理情况（备注并入）
-  const repairText = [get('repairNote'), get('remark') ? `备注：${get('remark')}` : '']
-    .filter(Boolean)
-    .join('\n');
-  appendIf(table, fieldRow('消缺处理情况', repairText, 'wo-repair-value wo-left'));
+  // 消缺处理情况
+  appendIf(table, fieldRow('消缺处理情况', get('repairNote'), 'wo-repair-value wo-left'));
+
+  // 风险控制措施 + 备注：一行（字段存在即显示，无值留空）
+  if (fieldIds.risk || fieldIds.remark) {
+    appendIf(
+      table,
+      pairRow([
+        { label: '风险控制措施', value: get('risk'), keepEmpty: true },
+        { label: '备注', value: get('remark'), keepEmpty: true },
+      ]),
+    );
+  }
 
   // 制约因素：填写形式（字段存在即显示整行，供填写；有值则带出）
   const constraintItems = CONSTRAINT_FIELDS.filter((name) => fieldIds[`constraint_${name}`]);
@@ -288,17 +309,20 @@ function renderOrder(
     appendIf(table, fieldRow(columnsById.get(id)?.name ?? '其他', value, 'wo-left'));
   }
 
-  // 签字区（表单固定结构，始终显示）：消缺人 / 班长
+  // 签字区（表单固定结构，始终显示）：消缺人 / 班长；姓名手写体，日期显示消项日期
   const signRow = h('div', 'wo-row wo-sign');
   const signCells = [
     { role: '消缺人', name: get('repairer') },
     { role: '班长', name: get('leader') },
   ];
+  const closeDate = dateOnly(get('closeTime'));
   signCells.forEach((item, idx) => {
     const cell = h('div', 'wo-sign-cell');
     if (idx < signCells.length - 1) cell.classList.add('wo-bordered');
-    cell.append(h('div', 'wo-sign-top', item.name ? `${item.role}：${item.name}` : item.role));
-    cell.append(h('div', 'wo-sign-bottom', '签字：　　　　　　日期：　　　年　　月　　日'));
+    const top = h('div', 'wo-sign-top', `${item.role}签字：`);
+    if (item.name) top.append(h('span', 'wo-handwriting', item.name));
+    cell.append(top);
+    cell.append(h('div', 'wo-sign-bottom', `日期：${closeDate || '　　　年　　月　　日'}`));
     signRow.append(cell);
   });
   table.append(signRow);
@@ -318,15 +342,16 @@ const WO_STYLES = `
 /* 一页两张工单：上下平分，中间虚线分隔 */
 .wo-order { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 .wo-divider { flex: 0 0 auto; border-top: 2px dashed #888; margin: 10px 0; }
+.wo-company { text-align: center; font-size: 15px; font-weight: 700; letter-spacing: 5px; margin-bottom: 2px; }
 .wo-title { text-align: center; font-size: 21px; font-weight: 800; letter-spacing: 8px; margin-bottom: 8px; }
 .wo-topmeta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
 .wo-table { border: 1.2px solid #333; }
 .wo-row { display: flex; border-bottom: 1px solid #333; min-height: 26px; }
 .wo-row:last-child { border-bottom: none; }
 .wo-label {
-  flex: 0 0 80px; display: flex; align-items: center; justify-content: center;
+  flex: 0 0 84px; display: flex; align-items: center; justify-content: center;
   padding: 5px 4px; font-weight: 700; border-right: 1px solid #333;
-  text-align: center; line-height: 1.4;
+  text-align: center; line-height: 1.4; white-space: nowrap;
 }
 .wo-value {
   flex: 1; min-width: 0; padding: 5px 8px; display: flex; align-items: center;
@@ -335,13 +360,17 @@ const WO_STYLES = `
 }
 .wo-left { justify-content: flex-start; text-align: left; align-items: flex-start; }
 .wo-bordered { border-right: 1px solid #333; }
-.wo-desc-value { min-height: 78px; }
+.wo-desc-value { justify-content: flex-start; text-align: left; min-height: 78px; }
 .wo-repair-value { min-height: 56px; }
 .wo-sign-cell {
   flex: 1; display: flex; flex-direction: column; justify-content: center;
   align-items: center; gap: 10px; padding: 8px 10px; min-height: 58px;
 }
 .wo-sign-top { font-weight: 700; }
+.wo-handwriting {
+  font-family: "STXingkai", "Xingkai SC", "KaiTi", "楷体", "Kaiti SC", cursive;
+  font-weight: 400; font-size: 17px; margin-left: 2px; color: #1a1a1a;
+}
 .wo-sign-bottom { letter-spacing: 1px; }
 `;
 
