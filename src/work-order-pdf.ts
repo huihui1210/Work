@@ -15,6 +15,8 @@ interface FieldDef {
   key: string;
   /** 匹配字段名的关键词（去空格、忽略大小写后包含匹配） */
   match: string[];
+  /** 为 true 时按字段名完全相等匹配（避免「负责人」误匹配「消缺负责人」等） */
+  exact?: boolean;
 }
 
 /** 工单固定字段定义；未匹配到的字段作为独立行显示，不丢数据 */
@@ -24,8 +26,12 @@ const FIELD_DEFS: FieldDef[] = [
   { key: 'post', match: ['所属岗位', '岗位', '班值'] },
   { key: 'level', match: ['分类定级', '缺陷等级', '定级', '分类', '等级'] },
   { key: 'desc', match: ['缺陷描述', '缺陷内容', '设备缺陷', '描述'] },
+  { key: 'deadline', match: ['计划期限', '计划完成', '期限'] },
   { key: 'repairNote', match: ['消缺情况', '处理情况', '消缺简记', '处理记录', '维修记录'] },
-  { key: 'repairer', match: ['消缺人', '消缺负责人', '维修负责人', '处理人'] },
+  { key: 'partyMember', match: ['党员责任人'], exact: true },
+  { key: 'manager', match: ['负责人'], exact: true },
+  { key: 'handler', match: ['处理人'], exact: true },
+  { key: 'repairer', match: ['消缺人'] },
   { key: 'leader', match: ['班长', '班组长'] },
   { key: 'closeTime', match: ['消项时间', '消缺完成日期', '完成日期', '消缺时间', '完成时间', '关闭时间'] },
   { key: 'remark', match: ['备注', '说明'] },
@@ -34,10 +40,8 @@ const FIELD_DEFS: FieldDef[] = [
 /** 与缺陷描述合并显示的字段（区域部位 / 设备名称 / 位号） */
 const DESC_PART_FIELDS = ['区域部位', '设备名称', '位号', '区域', '位置'];
 
-/** 制约因素字段（有值则勾选） */
+/** 制约因素字段（填写形式显示） */
 const CONSTRAINT_FIELDS = ['方案', '备件', '条件', '人员', '窗口'];
-
-const META_EXTRA_FIELDS = ['党员责任人', '是否消缺', '是否逾期'];
 
 function normalize(name: string): string {
   return name.replace(/[\s/*\\]/g, '').toLowerCase();
@@ -49,11 +53,14 @@ function resolveFields(columns: ExportColumn[]): Record<string, string | undefin
   const usedColumnIds = new Set<string>();
 
   for (const def of FIELD_DEFS) {
-    const hit = columns.find(
-      (col) =>
-        !usedColumnIds.has(col.id) &&
-        def.match.some((keyword) => normalize(col.name).includes(normalize(keyword))),
-    );
+    const hit = columns.find((col) => {
+      if (usedColumnIds.has(col.id)) return false;
+      return def.match.some((keyword) =>
+        def.exact
+          ? normalize(col.name) === normalize(keyword)
+          : normalize(col.name).includes(normalize(keyword)),
+      );
+    });
     if (hit) {
       result[def.key] = hit.id;
       usedColumnIds.add(hit.id);
@@ -71,16 +78,12 @@ function resolveFields(columns: ExportColumn[]): Record<string, string | undefin
     }
   }
 
-  // 其他固定小字段
-  for (const name of META_EXTRA_FIELDS) {
-    const hit = columns.find(
-      (col) => !usedColumnIds.has(col.id) && normalize(col.name) === normalize(name),
-    );
-    if (hit) {
-      result[`extra_${name}`] = hit.id;
-      usedColumnIds.add(hit.id);
-    }
-  }
+  // 是否类字段（是否消缺 / 是否逾期等）→ 勾选形式显示
+  const yesNoHits = columns.filter(
+    (col) => !usedColumnIds.has(col.id) && normalize(col.name).startsWith('是否'),
+  );
+  result.yesNoIds = JSON.stringify(yesNoHits.map((col) => col.id));
+  for (const col of yesNoHits) usedColumnIds.add(col.id);
 
   // 缺陷描述合并来源字段（区域部位 / 设备名称 / 位号等）
   const descPartHits = columns.filter(
@@ -169,6 +172,23 @@ function fieldRow(label: string, value: string, extraClass?: string): HTMLElemen
   return row;
 }
 
+/** 日期文本只保留到日（去掉时分） */
+function dateOnly(text: string): string {
+  return text.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?$/, '').trim();
+}
+
+/** 是否类字段 → 勾选文本：是/否 二选一勾选 */
+function yesNoText(value: string): string {
+  const v = value.trim();
+  if (!v) return '';
+  const isYes = /^(是|已|完|y|true|1)/i.test(v);
+  return isYes ? '☑ 是　　☐ 否' : '☐ 是　　☑ 否';
+}
+
+function appendIf(parent: HTMLElement, child: HTMLElement | null): void {
+  if (child) parent.append(child);
+}
+
 function renderOrder(
   row: RowMap,
   fieldIds: Record<string, string | undefined>,
@@ -190,79 +210,94 @@ function renderOrder(
   // 表格主体
   const table = h('div', 'wo-table');
 
-  const metaRow = pairRow([
-    { label: '缺陷等级', value: get('level') },
-    { label: '发现人', value: get('finder') },
-    { label: '所属岗位', value: get('post') },
-  ]);
-  if (metaRow) table.append(metaRow);
+  // 基本信息：缺陷等级 / 发现人 / 所属岗位
+  appendIf(
+    table,
+    pairRow([
+      { label: '缺陷等级', value: get('level') },
+      { label: '发现人', value: get('finder') },
+      { label: '所属岗位', value: get('post') },
+    ]),
+  );
 
   // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格
   const descPartIds: string[] = JSON.parse(fieldIds.descPartIds ?? '[]');
   const parts = descPartIds.map((id) => row[id] ?? '').filter(Boolean);
   const descText = [parts.join(' / '), get('desc')].filter(Boolean).join('\n');
-  const descRow = fieldRow('缺陷描述', descText, 'wo-desc-value');
-  if (descRow) table.append(descRow);
+  appendIf(table, fieldRow('缺陷描述', descText, 'wo-desc-value wo-left'));
+
+  // 日期：计划期限 / 消项时间（只到日）
+  appendIf(
+    table,
+    pairRow([
+      { label: '计划期限', value: dateOnly(get('deadline')) },
+      { label: '消项时间', value: dateOnly(get('closeTime')) },
+    ]),
+  );
+
+  // 人员：党员责任人 / 负责人 / 处理人（一行）
+  appendIf(
+    table,
+    pairRow([
+      { label: '党员责任人', value: get('partyMember') },
+      { label: '负责人', value: get('manager') },
+      { label: '处理人', value: get('handler') },
+    ]),
+  );
+
+  // 是否类状态：勾选形式
+  const yesNoIds: string[] = JSON.parse(fieldIds.yesNoIds ?? '[]');
+  appendIf(
+    table,
+    pairRow(
+      yesNoIds
+        .map((id) => ({
+          label: columnsById.get(id)?.name ?? '状态',
+          value: yesNoText(row[id] ?? ''),
+        }))
+        .filter((pair) => pair.value),
+    ),
+  );
 
   // 消缺处理情况（备注并入）
   const repairText = [get('repairNote'), get('remark') ? `备注：${get('remark')}` : '']
     .filter(Boolean)
     .join('\n');
-  const repairRow = fieldRow('消缺处理情况', repairText, 'wo-repair-value');
-  if (repairRow) table.append(repairRow);
+  appendIf(table, fieldRow('消缺处理情况', repairText, 'wo-repair-value wo-left'));
+
+  // 制约因素：填写形式（字段存在即显示整行，供填写；有值则带出）
+  const constraintItems = CONSTRAINT_FIELDS.filter((name) => fieldIds[`constraint_${name}`]);
+  if (constraintItems.length) {
+    const text = constraintItems
+      .map((name) => {
+        const v = get(`constraint_${name}`);
+        return v ? `${name}：${v}` : `${name}：`;
+      })
+      .join('　　');
+    const rowEl = h('div', 'wo-row');
+    rowEl.append(h('div', 'wo-label', '制约因素'));
+    rowEl.append(h('div', 'wo-value wo-left', text || '　'));
+    table.append(rowEl);
+  }
 
   // 其他信息：未归入固定位置且有值的字段，逐行显示
   const leftoverIds: string[] = JSON.parse(fieldIds.leftovers ?? '[]');
   for (const id of leftoverIds) {
     const value = (row[id] ?? '').trim();
     if (!value) continue;
-    const rowEl = fieldRow(columnsById.get(id)?.name ?? '其他', value);
-    if (rowEl) table.append(rowEl);
+    appendIf(table, fieldRow(columnsById.get(id)?.name ?? '其他', value, 'wo-left'));
   }
 
-  // 状态信息（党员责任人 / 是否消缺 / 是否逾期，存在且有值才显示）
-  const statusRow = pairRow(
-    META_EXTRA_FIELDS.map((name) => ({ label: name, value: get(`extra_${name}`) })),
-  );
-  if (statusRow) table.append(statusRow);
-
-  // 制约因素（表中存在该组字段才显示整行，有值勾选）
-  const constraintItems = CONSTRAINT_FIELDS.filter((name) => fieldIds[`constraint_${name}`]);
-  if (constraintItems.length) {
-    const rowEl = h('div', 'wo-row');
-    rowEl.append(h('div', 'wo-label', '制约因素'));
-    const cell = h('div', 'wo-value wo-constraints');
-    for (const name of constraintItems) {
-      const v = get(`constraint_${name}`);
-      const chip = h('span', 'wo-constraint');
-      chip.append(h('span', 'wo-checkbox', v ? '☑' : '☐'), h('span', undefined, name));
-      if (v) {
-        chip.append(h('span', 'wo-constraint-text', v));
-        chip.classList.add('checked');
-      }
-      cell.append(chip);
-    }
-    rowEl.append(cell);
-    table.append(rowEl);
-  }
-
-  // 消项时间（有值才显示）
-  const closeRow = pairRow([{ label: '消项时间', value: get('closeTime') }]);
-  if (closeRow) table.append(closeRow);
-
-  // 签字区（表单固定结构，始终显示）
+  // 签字区（表单固定结构，始终显示）：消缺人 / 班长
   const signRow = h('div', 'wo-row wo-sign');
   const signCells = [
-    { role: '消缺人（处理负责人）', name: get('repairer') },
-    { role: '班长（验收确认）', name: get('leader') },
+    { role: '消缺人', name: get('repairer') },
+    { role: '班长', name: get('leader') },
   ];
   signCells.forEach((item, idx) => {
     const cell = h('div', 'wo-sign-cell');
     if (idx < signCells.length - 1) cell.classList.add('wo-bordered');
-    const top = h('div', 'wo-sign-top');
-    top.append(h('span', 'wo-sign-role', item.role));
-    if (item.name) top.append(h('span', undefined, item.name));
-    cell.append(top);
+    cell.append(h('div', 'wo-sign-top', item.name ? `${item.role}：${item.name}` : item.role));
     cell.append(h('div', 'wo-sign-bottom', '签字：　　　　　　日期：　　　年　　月　　日'));
     signRow.append(cell);
   });
@@ -289,28 +324,24 @@ const WO_STYLES = `
 .wo-row { display: flex; border-bottom: 1px solid #333; min-height: 26px; }
 .wo-row:last-child { border-bottom: none; }
 .wo-label {
-  flex: 0 0 92px; display: flex; align-items: center; justify-content: center;
-  padding: 5px 6px; font-weight: 700; border-right: 1px solid #333;
+  flex: 0 0 80px; display: flex; align-items: center; justify-content: center;
+  padding: 5px 4px; font-weight: 700; border-right: 1px solid #333;
   text-align: center; line-height: 1.4;
 }
 .wo-value {
   flex: 1; min-width: 0; padding: 5px 8px; display: flex; align-items: center;
+  justify-content: center; text-align: center;
   white-space: pre-wrap; word-break: break-word; line-height: 1.55;
 }
+.wo-left { justify-content: flex-start; text-align: left; align-items: flex-start; }
 .wo-bordered { border-right: 1px solid #333; }
-.wo-desc-value { align-items: flex-start; min-height: 78px; }
-.wo-repair-value { align-items: flex-start; min-height: 56px; }
-.wo-constraints { flex-wrap: wrap; gap: 4px 14px; }
-.wo-constraint { display: inline-flex; align-items: center; gap: 3px; }
-.wo-checkbox { font-size: 13px; }
-.wo-constraint.checked { font-weight: 700; }
-.wo-constraint-text { color: #444; font-weight: 400; }
+.wo-desc-value { min-height: 78px; }
+.wo-repair-value { min-height: 56px; }
 .wo-sign-cell {
-  flex: 1; display: flex; flex-direction: column; justify-content: space-between;
-  gap: 8px; padding: 7px 10px; min-height: 58px;
+  flex: 1; display: flex; flex-direction: column; justify-content: center;
+  align-items: center; gap: 10px; padding: 8px 10px; min-height: 58px;
 }
-.wo-sign-top { display: flex; gap: 6px; align-items: baseline; }
-.wo-sign-role { font-weight: 700; }
+.wo-sign-top { font-weight: 700; }
 .wo-sign-bottom { letter-spacing: 1px; }
 `;
 
