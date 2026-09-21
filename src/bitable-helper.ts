@@ -92,6 +92,8 @@ export async function getSelectedData(): Promise<ExportData> {
   const visibleSet = new Set(visibleFieldIds);
   const columns: ExportColumn[] = fieldMetas
     .filter((field) => visibleSet.has(field.id))
+    // 丢弃未命名的占位字段（如新建后未命名的复选框列，导出只会产生空表头）
+    .filter((field) => field.name.trim() !== '')
     .map((field) => ({ id: field.id, name: field.name, type: field.type }));
 
   const rows: IRecord[] = [];
