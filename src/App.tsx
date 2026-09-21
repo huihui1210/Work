@@ -263,8 +263,8 @@ export default function App() {
             checked={withImages}
             onChange={(e) => setWithImages(e.target.checked)}
           />
-          <span className="checkbox-text">同时导出附件图片</span>
-          <span className="checkbox-hint">仅 Excel 格式生效，默认关闭</span>
+          <span className="checkbox-text">导出图片</span>
+          <span className="checkbox-hint">仅 Excel 格式生效</span>
         </label>
       </section>
 
@@ -274,14 +274,14 @@ export default function App() {
           : format === 'dms'
             ? '一键发送到缺陷分析系统'
             : format === 'pdf'
-              ? '一键导出'
+              ? '一键导出工单PDF'
               : '一键导出'}
       </button>
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
 
       <p className="tips">
-        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。勾选「同时导出附件图片」可在
+        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。勾选「导出图片」可在
         Excel 中内嵌缺陷图片。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
     </div>
