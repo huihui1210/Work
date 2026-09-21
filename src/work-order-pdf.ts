@@ -167,7 +167,7 @@ function fieldRow(label: string, value: string, extraClass?: string): HTMLElemen
   const row = h('div', 'wo-row');
   row.append(h('div', 'wo-label', label));
   const cell = h('div', 'wo-value', value);
-  if (extraClass) cell.classList.add(extraClass);
+  if (extraClass) cell.classList.add(...extraClass.split(/\s+/).filter(Boolean));
   row.append(cell);
   return row;
 }
