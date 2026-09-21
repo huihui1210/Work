@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { bitable } from '@lark-base-open/js-sdk';
+import { bitable, FieldType } from '@lark-base-open/js-sdk';
 import {
   ExportError,
   cellToText,
@@ -185,11 +185,13 @@ export default function App() {
             text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
           });
         } else {
-          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          // 未勾选图片：不导出附件列
+          const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
+          const blob = await buildFileBlob('xlsx', columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'success',
-            text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列）。`,
+            text: `已导出 ${data.rows.length} 条记录（${columns.length} 列，未含附件列）。`,
           });
         }
         void refresh();
@@ -264,7 +266,7 @@ export default function App() {
             onChange={(e) => setWithImages(e.target.checked)}
           />
           <span className="checkbox-text">导出图片</span>
-          <span className="checkbox-hint">仅 Excel 格式生效</span>
+          <span className="checkbox-hint">仅 Excel 格式生效，不勾选则不导出附件列</span>
         </label>
       </section>
 
