@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@lark-base-open/js-sdk": "^1.0.2",
+    "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "html2canvas-pro": "^2.4.4",
     "jspdf": "^4.2.1",

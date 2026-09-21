@@ -12,6 +12,7 @@ import { buildFileBlob, buildFilename, downloadBlob, exportXlsxWithImages } from
 import type { ExportFormat } from './exporter';
 import * as LZString from 'lz-string';
 import { buildWorkOrderPdfBlob } from './work-order-pdf';
+import { buildWorkOrderDocxBlob } from './work-order-docx';
 import './styles.css';
 
 type AppFormat = ExportFormat | 'dms' | 'pdf';
@@ -41,6 +42,7 @@ export default function App() {
   const [notInHost, setNotInHost] = useState(false);
   const [format, setFormat] = useState<AppFormat>('xlsx');
   const [withImages, setWithImages] = useState(false);
+  const [withWord, setWithWord] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
 
@@ -150,17 +152,29 @@ export default function App() {
       }
 
       if (format === 'pdf') {
-        setMessage({ type: 'info', text: '正在生成工单 PDF…' });
         // 工单不包含缺陷图片：过滤附件列
         const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
-        const blob = await buildWorkOrderPdfBlob(columns, data.rows, (done, total) => {
-          setMessage({ type: 'info', text: `正在生成工单 PDF（${done}/${total} 页）…` });
-        });
-        downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'pdf'));
-        setMessage({
-          type: 'success',
-          text: `已生成 ${data.rows.length} 张缺陷处理工单 PDF（按缺陷编号排序）。`,
-        });
+        if (withWord) {
+          setMessage({ type: 'info', text: '正在生成工单 Word…' });
+          const blob = await buildWorkOrderDocxBlob(columns, data.rows, (done, total) => {
+            setMessage({ type: 'info', text: `正在生成工单 Word（${done}/${total} 张）…` });
+          });
+          downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'docx'));
+          setMessage({
+            type: 'success',
+            text: `已生成 ${data.rows.length} 张可编辑工单 Word（按缺陷编号排序）。`,
+          });
+        } else {
+          setMessage({ type: 'info', text: '正在生成工单 PDF…' });
+          const blob = await buildWorkOrderPdfBlob(columns, data.rows, (done, total) => {
+            setMessage({ type: 'info', text: `正在生成工单 PDF（${done}/${total} 页）…` });
+          });
+          downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'pdf'));
+          setMessage({
+            type: 'success',
+            text: `已生成 ${data.rows.length} 张缺陷处理工单 PDF（按缺陷编号排序）。`,
+          });
+        }
         void refresh();
         return;
       }
@@ -261,15 +275,28 @@ export default function App() {
             </button>
           ))}
         </div>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={withImages}
-            onChange={(e) => setWithImages(e.target.checked)}
-          />
-          <span className="checkbox-text">导出图片</span>
-          <span className="checkbox-hint">仅 Excel 格式生效，不勾选则不导出附件列</span>
-        </label>
+        {format === 'xlsx' && (
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={withImages}
+              onChange={(e) => setWithImages(e.target.checked)}
+            />
+            <span className="checkbox-text">导出图片</span>
+            <span className="checkbox-hint">在 Excel 中内嵌缺陷图片，不勾选则不导出附件列</span>
+          </label>
+        )}
+        {format === 'pdf' && (
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={withWord}
+              onChange={(e) => setWithWord(e.target.checked)}
+            />
+            <span className="checkbox-text">导出Word</span>
+            <span className="checkbox-hint">导出可编辑的 Word 格式工单</span>
+          </label>
+        )}
       </section>
 
       <button type="button" className="primary-btn" disabled={exporting} onClick={() => void handleExport()}>
@@ -278,15 +305,17 @@ export default function App() {
           : format === 'dms'
             ? '一键发送到缺陷分析系统'
             : format === 'pdf'
-              ? '一键导出工单PDF'
+              ? withWord
+                ? '一键导出工单Word'
+                : '一键导出工单PDF'
               : '一键导出'}
       </button>
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
 
       <p className="tips">
-        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。勾选「导出图片」可在
-        Excel 中内嵌缺陷图片。仅导出当前视图可见的列，数据不会离开当前页面。
+        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。Excel 可勾选内嵌缺陷图片；
+        工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
     </div>
   );

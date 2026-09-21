@@ -9,7 +9,7 @@ import type { ExportColumn } from './bitable-helper';
  * 区域部位 / 设备名称 / 位号 与缺陷描述合并为一个「缺陷描述」单元格。
  */
 
-type RowMap = Record<string, string>;
+export type RowMap = Record<string, string>;
 
 interface FieldDef {
   key: string;
@@ -44,14 +44,14 @@ const FIELD_DEFS: FieldDef[] = [
 const DESC_PART_FIELDS = ['区域部位', '设备名称', '位号', '区域', '位置'];
 
 /** 制约因素字段（填写形式显示） */
-const CONSTRAINT_FIELDS = ['方案', '备件', '条件', '人员', '窗口'];
+export const CONSTRAINT_FIELDS = ['方案', '备件', '条件', '人员', '窗口'];
 
 function normalize(name: string): string {
   return name.replace(/[\s/*\\]/g, '').toLowerCase();
 }
 
 /** 按字段名模糊匹配列 id */
-function resolveFields(columns: ExportColumn[]): Record<string, string | undefined> {
+export function resolveFields(columns: ExportColumn[]): Record<string, string | undefined> {
   const result: Record<string, string | undefined> = {};
   const usedColumnIds = new Set<string>();
 
@@ -105,7 +105,7 @@ function resolveFields(columns: ExportColumn[]): Record<string, string | undefin
   return result;
 }
 
-function toRowMap(columns: ExportColumn[], record: IRecord): RowMap {
+export function toRowMap(columns: ExportColumn[], record: IRecord): RowMap {
   const map: RowMap = {};
   for (const column of columns) {
     map[column.id] = cellToText(record.fields[column.id] ?? null, column.type).trim();
@@ -114,14 +114,14 @@ function toRowMap(columns: ExportColumn[], record: IRecord): RowMap {
 }
 
 /** 从缺陷编号前 8 位解析发现日期 YYYY-MM-DD */
-function parseDiscoverDate(defectNo: string): string {
+export function parseDiscoverDate(defectNo: string): string {
   const match = /^(\d{4})(\d{2})(\d{2})/.exec(defectNo);
   if (!match) return '';
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
 /** 按缺陷编号升序排序（编号缺失时保持原顺序） */
-function sortRows(rows: RowMap[], defectNoId: string | undefined): RowMap[] {
+export function sortRows(rows: RowMap[], defectNoId: string | undefined): RowMap[] {
   if (!defectNoId) return rows;
   return rows
     .map((row, index) => ({ row, index }))
@@ -176,12 +176,12 @@ function fieldRow(label: string, value: string, extraClass?: string): HTMLElemen
 }
 
 /** 日期文本只保留到日（去掉时分） */
-function dateOnly(text: string): string {
+export function dateOnly(text: string): string {
   return text.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?$/, '').trim();
 }
 
 /** 是否类字段 → 勾选文本：是/否 二选一勾选 */
-function yesNoText(value: string): string {
+export function yesNoText(value: string): string {
   const v = value.trim();
   if (!v) return '';
   const isYes = /^(是|已|完|y|true|1)/i.test(v);
@@ -339,8 +339,11 @@ const WO_STYLES = `
   font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
   font-size: 12px; display: flex; flex-direction: column;
 }
-/* 一页两张工单：上下平分，中间虚线分隔 */
-.wo-order { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+/* 一页两张工单：上下平分，各自在半页内整体水平/垂直居中，中间虚线分隔 */
+.wo-order {
+  flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;
+  justify-content: center;
+}
 .wo-divider { flex: 0 0 auto; border-top: 2px dashed #888; margin: 10px 0; }
 .wo-company { text-align: center; font-size: 15px; font-weight: 700; letter-spacing: 5px; margin-bottom: 2px; }
 .wo-title { text-align: center; font-size: 21px; font-weight: 800; letter-spacing: 8px; margin-bottom: 8px; }
