@@ -508,19 +508,6 @@ export function buildFilename(base: string, ext: string): string {
   return `${base.replace(/[\\/:*?"<>|]/g, '_')}_${stamp}.${ext}`;
 }
 
-/**
- * 过滤掉无意义的列：
- * 1. 未命名的字段（多维表格中未保存名称的空字段，导出后只有空表头）；
- * 2. 在所选记录中没有任何数据的列（整列空白）。
- */
-export function filterNonEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
-  return columns.filter(
-    (col) =>
-      col.name.trim() !== '' &&
-      rows.some((record) => cellToText(record.fields[col.id] ?? null, col.type).trim() !== ''),
-  );
-}
-
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }

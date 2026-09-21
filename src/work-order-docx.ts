@@ -4,9 +4,9 @@ import {
   BorderStyle,
   Document,
   HeightRule,
-  LineRuleType,
   Packer,
   Paragraph,
+  SectionType,
   Table,
   TableCell,
   TableRow,
@@ -79,11 +79,7 @@ function makeCell(spec: CellSpec): TableCell {
   });
 }
 
-/** 当前工单的行高累加器（用于估算工单高度，把虚线定位到页面中线） */
-let activeRowHeightSink: ((height: number) => void) | null = null;
-
 function makeRow(cells: TableCell[], minHeight?: number): TableRow {
-  activeRowHeightSink?.(minHeight ?? 300);
   return new TableRow({
     cantSplit: true,
     height: minHeight ? { value: minHeight, rule: HeightRule.ATLEAST } : undefined,
@@ -91,22 +87,20 @@ function makeRow(cells: TableCell[], minHeight?: number): TableRow {
   });
 }
 
-/** 固定高度的空白段落（用于页面纵向定位） */
-function makeExactSpacer(height: number): Paragraph {
+const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+const NO_BORDERS = {
+  top: NO_BORDER,
+  bottom: NO_BORDER,
+  left: NO_BORDER,
+  right: NO_BORDER,
+};
+
+/** 无边框空段落（用于表格之间防合并） */
+function makeTinyParagraph(): Paragraph {
   return new Paragraph({
-    spacing: { before: 0, after: 0, line: Math.max(1, Math.round(height)), lineRule: LineRuleType.EXACT },
+    spacing: { before: 0, after: 0, line: 200 },
     children: [new TextRun({ text: '', size: 2 })],
   });
-}
-
-/** 估算长文本在指定宽度（twips）内换行产生的额外高度 */
-function wrapExtra(text: string, widthTwips: number): number {
-  if (!text) return 0;
-  const charsPerLine = Math.max(1, Math.floor(widthTwips / 180));
-  const lines = text
-    .split('\n')
-    .reduce((sum, seg) => sum + Math.max(1, Math.ceil([...seg].length / charsPerLine)), 0);
-  return Math.max(0, lines - 1) * 260;
 }
 
 /** 标签 + 值（跨 span 列） */
@@ -134,22 +128,21 @@ function joinNonEmpty(parts: string[], sep = '　'): string {
   return parts.filter(Boolean).join(sep);
 }
 
-function buildOrderChildren(
+/** 构建单张工单的内容块（标题 + 顶部信息 + 主表），由外层容器负责分页与纵向定位 */
+function buildOrderBlocks(
   row: RowMap,
   fieldIds: Record<string, string | undefined>,
   columnsById: Map<string, ExportColumn>,
-  orderIndex: number,
-  totalCount: number,
 ): (Paragraph | Table)[] {
   const get = (key: string) => (fieldIds[key] ? row[fieldIds[key]!] ?? '' : '');
   const defectNo = get('defectNo');
   const discoverDate = parseDiscoverDate(defectNo);
   const closeDate = dateOnly(get('closeTime'));
 
-  const children: (Paragraph | Table)[] = [];
+  const blocks: (Paragraph | Table)[] = [];
 
   // 抬头（公司 / 标题）
-  children.push(
+  blocks.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { before: 0, after: 20 },
@@ -178,7 +171,7 @@ function buildOrderChildren(
 
   // 顶部信息（发现时间 / 编号），无边框两列表格
   if (discoverDate || defectNo) {
-    children.push(
+    blocks.push(
       new Table({
         width: { size: PAGE_CONTENT_WIDTH, type: WidthType.DXA },
         columnWidths: [5233, 5233],
@@ -232,22 +225,12 @@ function buildOrderChildren(
 
   // 防止相邻表格被 Word 合并：顶部信息表与主表之间加微间距
   if (discoverDate || defectNo) {
-    children.push(
-      new Paragraph({
-        spacing: { before: 10, after: 10 },
-        children: [new TextRun({ text: '', size: 2 })],
-      }),
-    );
+    blocks.push(makeTinyParagraph());
   }
 
   /* ------- 主表格 ------- */
   const [c0, c1, c2, c3, c4, c5] = GRID;
   const rows: TableRow[] = [];
-  let tableH = 0;
-  let wrapH = 0;
-  activeRowHeightSink = (h) => {
-    tableH += h;
-  };
 
   // 基本信息：缺陷等级 / 发现人 / 所属岗位
   rows.push(
@@ -357,7 +340,6 @@ function buildOrderChildren(
         return v ? `${name}：${v}` : `${name}：`;
       })
       .join('　　');
-    wrapH += wrapExtra(constraintText, c1 + c2 + c3 + c4 + c5);
     rows.push(
       makeRow(
         [
@@ -374,7 +356,6 @@ function buildOrderChildren(
   for (const id of leftoverIds) {
     const value = (row[id] ?? '').trim();
     if (!value) continue;
-    wrapH += wrapExtra(value, c1 + c2 + c3 + c4 + c5);
     rows.push(
       makeRow(
         [
@@ -440,16 +421,8 @@ function buildOrderChildren(
       560,
     ),
   );
-  activeRowHeightSink = null;
 
-  // 统计长文本换行带来的额外行高（描述 / 处理情况 / 风险 / 备注）
-  const fullWidth = c1 + c2 + c3 + c4 + c5;
-  wrapH += wrapExtra(descText, fullWidth);
-  wrapH += wrapExtra(get('repairNote'), fullWidth);
-  wrapH += wrapExtra(get('risk'), c1 + c2);
-  wrapH += wrapExtra(get('remark'), c1 + c2);
-
-  children.push(
+  blocks.push(
     new Table({
       width: { size: PAGE_CONTENT_WIDTH, type: WidthType.DXA },
       columnWidths: GRID,
@@ -465,49 +438,60 @@ function buildOrderChildren(
     }),
   );
 
-  /* ------- 纵向定位：与 PDF 一致，虚线位于页面中线，上下留白对称 ------- */
-  const PAGE_CONTENT_HEIGHT = 16838 - 567 * 2;
-  const HALF_PAGE = PAGE_CONTENT_HEIGHT / 2;
-  const TITLE_BLOCK_H = 700;
-  const META_BLOCK_H = 320;
-  // 签字行两行文字实际略高于最小行高
-  const SIGN_EXTRA_H = 60;
-  const orderHeight =
-    TITLE_BLOCK_H +
-    (discoverDate || defectNo ? META_BLOCK_H : 0) +
-    tableH +
-    wrapH +
-    SIGN_EXTRA_H;
+  return blocks;
+}
 
-  const isFirstOfPage = orderIndex % 2 === 0;
-  const hasPartner = orderIndex + 1 < totalCount;
+/** A4 内容区与半页高度（twips），与页边距设置保持一致 */
+const PAGE_MARGIN_Y = 567;
+const PAGE_CONTENT_HEIGHT = 16838 - PAGE_MARGIN_Y * 2;
+const HALF_PAGE_HEIGHT = Math.floor(PAGE_CONTENT_HEIGHT / 2);
 
-  // 页首元素：奇数页起始先分页；单张工单独占页时在顶部补空白整体居中
-  const head: Paragraph[] = [];
-  if (isFirstOfPage && orderIndex > 0) {
-    head.push(new Paragraph({ pageBreakBefore: true, children: [new TextRun({ text: '', size: 2 })] }));
-  }
-  if (isFirstOfPage && !hasPartner) {
-    const topPad = Math.max(0, Math.round((PAGE_CONTENT_HEIGHT - orderHeight) / 2));
-    head.push(makeExactSpacer(topPad));
-  }
-  if (head.length) children.unshift(...head);
+/**
+ * 一页容器：1 列 2 行的无边框表格，每行固定半页高，工单内容在半区内垂直居中。
+ * 第二张工单存在时，上半区底边显示虚线分隔；不存在时下半区留空（工单仍位于上半区）。
+ */
+function buildPageTable(first: (Paragraph | Table)[], second: (Paragraph | Table)[] | null): Table {
+  const halfCellBorders = (withDashedBottom: boolean) => ({
+    ...NO_BORDERS,
+    bottom: withDashedBottom
+      ? { style: BorderStyle.DASHED, size: 6, color: '888888' }
+      : NO_BORDER,
+  });
 
-  if (isFirstOfPage && hasPartner) {
-    // 同页两张：第一张后补空白，把虚线推到页面正中
-    const gap = Math.max(40, Math.round(HALF_PAGE - orderHeight - 80));
-    children.push(makeExactSpacer(gap));
-    children.push(
-      new Paragraph({
-        spacing: { before: 0, after: 0 },
-        border: { bottom: { style: BorderStyle.DASHED, size: 6, color: '888888', space: 1 } },
-        children: [new TextRun({ text: '', size: 2 })],
+  const makeHalfCell = (content: (Paragraph | Table)[] | null, withDashedBottom: boolean) => {
+    // 空单元格至少要有一个空段落
+    const inner = content && content.length ? content : [makeTinyParagraph()];
+    return new TableCell({
+      width: { size: PAGE_CONTENT_WIDTH, type: WidthType.DXA },
+      borders: halfCellBorders(withDashedBottom),
+      verticalAlign: VerticalAlign.CENTER,
+      margins: { top: 40, bottom: 40, left: 0, right: 0 },
+      children: inner,
+    });
+  };
+
+  return new Table({
+    width: { size: PAGE_CONTENT_WIDTH, type: WidthType.DXA },
+    columnWidths: [PAGE_CONTENT_WIDTH],
+    borders: {
+      top: NO_BORDER,
+      bottom: NO_BORDER,
+      left: NO_BORDER,
+      right: NO_BORDER,
+      insideHorizontal: NO_BORDER,
+      insideVertical: NO_BORDER,
+    },
+    rows: [
+      new TableRow({
+        height: { value: HALF_PAGE_HEIGHT, rule: HeightRule.EXACT },
+        children: [makeHalfCell(first, second !== null)],
       }),
-    );
-    children.push(makeExactSpacer(80));
-  }
-
-  return children;
+      new TableRow({
+        height: { value: PAGE_CONTENT_HEIGHT - HALF_PAGE_HEIGHT, rule: HeightRule.EXACT },
+        children: [makeHalfCell(second, false)],
+      }),
+    ],
+  });
 }
 
 /** 生成可编辑的 Word 工单 Blob */
@@ -523,11 +507,16 @@ export async function buildWorkOrderDocxBlob(
   );
   const columnsById = new Map(columns.map((col) => [col.id, col]));
 
-  const children: (Paragraph | Table)[] = [];
-  rowMaps.forEach((row, index) => {
-    children.push(...buildOrderChildren(row, fieldIds, columnsById, index, rowMaps.length));
+  // 每张工单生成内容块，按两单一页分组，每节一页（分节符天然分页，不留空行）
+  const blocksPerOrder = rowMaps.map((row, index) => {
     onProgress?.(index + 1, rowMaps.length);
+    return buildOrderBlocks(row, fieldIds, columnsById);
   });
+
+  const pageTables: Table[] = [];
+  for (let i = 0; i < blocksPerOrder.length; i += 2) {
+    pageTables.push(buildPageTable(blocksPerOrder[i], blocksPerOrder[i + 1] ?? null));
+  }
 
   const doc = new Document({
     styles: {
@@ -540,17 +529,16 @@ export async function buildWorkOrderDocxBlob(
         },
       },
     },
-    sections: [
-      {
-        properties: {
-          page: {
-            size: { width: 11906, height: 16838 },
-            margin: { top: 567, bottom: 567, left: 720, right: 720 },
-          },
+    sections: pageTables.map((pageTable) => ({
+      properties: {
+        type: SectionType.NEXT_PAGE,
+        page: {
+          size: { width: 11906, height: 16838 },
+          margin: { top: PAGE_MARGIN_Y, bottom: PAGE_MARGIN_Y, left: 720, right: 720 },
         },
-        children,
       },
-    ],
+      children: [pageTable],
+    })),
   });
 
   return Packer.toBlob(doc);

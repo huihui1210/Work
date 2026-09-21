@@ -399,7 +399,7 @@ export async function buildWorkOrderPdfBlob(
   const columnsById = new Map(columns.map((col) => [col.id, col]));
   const orders = rowMaps.map((row) => renderOrder(row, fieldIds, columnsById));
 
-  // 一页 A4 放两张工单，中间虚线分隔（奇数张时最后一页只放一张）
+  // 一页 A4 放两张工单，中间虚线分隔；奇数张时下半区留空占位（工单只占上半区）
   const pages: HTMLElement[] = [];
   for (let i = 0; i < orders.length; i += 2) {
     const page = h('div', 'wo-page');
@@ -407,6 +407,8 @@ export async function buildWorkOrderPdfBlob(
     if (orders[i + 1]) {
       page.append(h('div', 'wo-divider'));
       page.append(orders[i + 1]);
+    } else {
+      page.append(h('div', 'wo-order wo-order-empty'));
     }
     pages.push(page);
   }

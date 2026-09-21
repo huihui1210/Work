@@ -8,13 +8,7 @@ import {
   getSelectedData,
 } from './bitable-helper';
 import type { SelectionInfo } from './bitable-helper';
-import {
-  buildFileBlob,
-  buildFilename,
-  downloadBlob,
-  exportXlsxWithImages,
-  filterNonEmptyColumns,
-} from './exporter';
+import { buildFileBlob, buildFilename, downloadBlob, exportXlsxWithImages } from './exporter';
 import type { ExportFormat } from './exporter';
 import * as LZString from 'lz-string';
 import { buildWorkOrderPdfBlob } from './work-order-pdf';
@@ -129,12 +123,7 @@ export default function App() {
         const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payloadRows));
 
         if (compressed.length > DMS_MAX_PAYLOAD_CHARS) {
-          const blob = await buildFileBlob(
-            'xlsx',
-            filterNonEmptyColumns(data.columns, data.rows),
-            data.rows,
-            data.viewName,
-          );
+          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'info',
@@ -152,12 +141,7 @@ export default function App() {
           });
           void refresh();
         } catch {
-          const blob = await buildFileBlob(
-            'xlsx',
-            filterNonEmptyColumns(data.columns, data.rows),
-            data.rows,
-            data.viewName,
-          );
+          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'error',
@@ -200,7 +184,7 @@ export default function App() {
           setMessage({ type: 'info', text: '正在读取缺陷图片…' });
           const attachmentMap = await getAttachmentMap(data.columns, data.rows);
           const blob = await exportXlsxWithImages(
-            filterNonEmptyColumns(data.columns, data.rows),
+            data.columns,
             data.rows,
             attachmentMap,
             data.viewName,
@@ -217,11 +201,8 @@ export default function App() {
             text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
           });
         } else {
-          // 未勾选图片：不导出附件列，并过滤掉没有数据的列
-          const columns = filterNonEmptyColumns(
-            data.columns.filter((col) => col.type !== FieldType.Attachment),
-            data.rows,
-          );
+          // 未勾选图片：不导出附件列（其余字段全部保留，即使选中记录中该列暂无数据）
+          const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
           const blob = await buildFileBlob('xlsx', columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
