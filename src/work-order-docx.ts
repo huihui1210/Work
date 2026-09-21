@@ -3,10 +3,11 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  DocumentGridType,
   HeightRule,
+  LineRuleType,
   Packer,
   Paragraph,
-  SectionType,
   Table,
   TableCell,
   TableRow,
@@ -98,7 +99,7 @@ const NO_BORDERS = {
 /** 无边框空段落（用于表格之间防合并） */
 function makeTinyParagraph(): Paragraph {
   return new Paragraph({
-    spacing: { before: 0, after: 0, line: 200 },
+    spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT },
     children: [new TextRun({ text: '', size: 2 })],
   });
 }
@@ -441,16 +442,31 @@ function buildOrderBlocks(
   return blocks;
 }
 
-/** A4 内容区与半页高度（twips），与页边距设置保持一致 */
-const PAGE_MARGIN_Y = 567;
-const PAGE_CONTENT_HEIGHT = 16838 - PAGE_MARGIN_Y * 2;
-const HALF_PAGE_HEIGHT = Math.floor(PAGE_CONTENT_HEIGHT / 2);
+/** A4 物理尺寸与正中线（twips） */
+const PAGE_HEIGHT = 16838;
+const PAGE_CENTER = PAGE_HEIGHT / 2; // 8419
+/**
+ * 半页容器高度：物理半页 7852 减去 120 预留。
+ * Word 对表格后必需的空段落标记有约 120twips 最小行高，无法再压缩，
+ * 因此通过上移 120、底部预留 150 的方式，保证：
+ *  - 上边框 = 上边距 687，虚线 = 687 + 7732 = 8419（物理正中线）
+ *  - 下边框到底边留白 = 687，与顶部视觉完全对称
+ */
+const HALF_PAGE_HEIGHT = 7732;
+const MARGIN_TOP = PAGE_CENTER - HALF_PAGE_HEIGHT; // 687
+const MARGIN_BOTTOM = 537;
+const PAGE_CONTENT_HEIGHT = HALF_PAGE_HEIGHT * 2;
 
 /**
  * 一页容器：1 列 2 行的无边框表格，每行固定半页高，工单内容在半区内垂直居中。
  * 第二张工单存在时，上半区底边显示虚线分隔；不存在时下半区留空（工单仍位于上半区）。
+ * 第 2 页起在内容前插入带 pageBreakBefore 的零高段落实现分页，不额外占行。
  */
-function buildPageTable(first: (Paragraph | Table)[], second: (Paragraph | Table)[] | null): Table {
+function buildPageTable(
+  first: (Paragraph | Table)[],
+  second: (Paragraph | Table)[] | null,
+  needPageBreak: boolean,
+): Table {
   const halfCellBorders = (withDashedBottom: boolean) => ({
     ...NO_BORDERS,
     bottom: withDashedBottom
@@ -458,9 +474,24 @@ function buildPageTable(first: (Paragraph | Table)[], second: (Paragraph | Table
       : NO_BORDER,
   });
 
-  const makeHalfCell = (content: (Paragraph | Table)[] | null, withDashedBottom: boolean) => {
+  const makeHalfCell = (
+    content: (Paragraph | Table)[] | null,
+    withDashedBottom: boolean,
+    breakBefore = false,
+  ) => {
     // 空单元格至少要有一个空段落
-    const inner = content && content.length ? content : [makeTinyParagraph()];
+    const inner: (Paragraph | Table)[] = [];
+    if (breakBefore) {
+      inner.push(
+        new Paragraph({
+          pageBreakBefore: true,
+          spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT },
+          children: [new TextRun({ text: '', size: 2 })],
+        }),
+      );
+    }
+    if (content && content.length) inner.push(...content);
+    else inner.push(makeTinyParagraph());
     return new TableCell({
       width: { size: PAGE_CONTENT_WIDTH, type: WidthType.DXA },
       borders: halfCellBorders(withDashedBottom),
@@ -483,10 +514,12 @@ function buildPageTable(first: (Paragraph | Table)[], second: (Paragraph | Table
     },
     rows: [
       new TableRow({
+        cantSplit: true,
         height: { value: HALF_PAGE_HEIGHT, rule: HeightRule.EXACT },
-        children: [makeHalfCell(first, second !== null)],
+        children: [makeHalfCell(first, second !== null, needPageBreak)],
       }),
       new TableRow({
+        cantSplit: true,
         height: { value: PAGE_CONTENT_HEIGHT - HALF_PAGE_HEIGHT, rule: HeightRule.EXACT },
         children: [makeHalfCell(second, false)],
       }),
@@ -507,38 +540,52 @@ export async function buildWorkOrderDocxBlob(
   );
   const columnsById = new Map(columns.map((col) => [col.id, col]));
 
-  // 每张工单生成内容块，按两单一页分组，每节一页（分节符天然分页，不留空行）
+  // 每张工单生成内容块，按两单一页分组为容器表格
   const blocksPerOrder = rowMaps.map((row, index) => {
     onProgress?.(index + 1, rowMaps.length);
     return buildOrderBlocks(row, fieldIds, columnsById);
   });
 
-  const pageTables: Table[] = [];
+  const bodyChildren: (Paragraph | Table)[] = [];
+  let pageIndex = 0;
   for (let i = 0; i < blocksPerOrder.length; i += 2) {
-    pageTables.push(buildPageTable(blocksPerOrder[i], blocksPerOrder[i + 1] ?? null));
+    // 第 2 页起靠容器内部 pageBreakBefore 分页；页间用 20twips 段落防止表格合并
+    if (pageIndex > 0) bodyChildren.push(makeTinyParagraph());
+    bodyChildren.push(
+      buildPageTable(blocksPerOrder[i], blocksPerOrder[i + 1] ?? null, pageIndex > 0),
+    );
+    pageIndex += 1;
   }
 
   const doc = new Document({
     styles: {
       default: {
         document: {
+          // 默认 2pt 仅作用于自动生成的空段落标记（表格后/嵌套表后），
+          // 所有业务文字都显式指定了字号，不受影响
           run: {
-            size: BODY_SIZE,
+            size: 4,
             font: { ascii: '微软雅黑', eastAsia: '微软雅黑', hAnsi: '微软雅黑' },
+          },
+          paragraph: {
+            spacing: { before: 0, after: 0, line: 240 },
           },
         },
       },
     },
-    sections: pageTables.map((pageTable) => ({
-      properties: {
-        type: SectionType.NEXT_PAGE,
-        page: {
-          size: { width: 11906, height: 16838 },
-          margin: { top: PAGE_MARGIN_Y, bottom: PAGE_MARGIN_Y, left: 720, right: 720 },
+    sections: [
+      {
+        properties: {
+          page: {
+            size: { width: 11906, height: 16838 },
+            margin: { top: MARGIN_TOP, bottom: MARGIN_BOTTOM, left: 720, right: 720 },
+          },
+          // 网格行距压到 1twips：消除空段落被默认 360 网格吸附拉高导致的整页溢出
+          grid: { type: DocumentGridType.LINES, linePitch: 1 },
         },
+        children: bodyChildren,
       },
-      children: [pageTable],
-    })),
+    ],
   });
 
   return Packer.toBlob(doc);
