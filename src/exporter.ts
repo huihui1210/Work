@@ -7,12 +7,12 @@ import type * as ExcelJSTypes from 'exceljs';
 export type ExportFormat = 'xlsx' | 'csv' | 'json' | 'clipboard';
 
 /** 图片在单元格中的显示尺寸（px），限制在单元格宽度内 */
-const IMG_TARGET_WIDTH = 80;
-const IMG_MAX_HEIGHT = 60;
+const IMG_TARGET_WIDTH = 64;
+const IMG_MAX_HEIGHT = 48;
 /** 图片与单元格边缘、图片之间的间距（px） */
 const IMG_GAP = 4;
-/** 附件列列宽（Excel 字符单位，1 字符约 7px，12 字符约 89px > 图片宽 + 间距） */
-const ATTACHMENT_COL_WIDTH = 12;
+/** 附件列列宽（Excel 字符单位，1 字符约 7px，10 字符约 75px > 图片宽 + 间距） */
+const ATTACHMENT_COL_WIDTH = 10;
 /** px → EMU（ExcelJS 锚点偏移单位，1px = 9525 EMU） */
 const PX_TO_EMU = 9525;
 /** 同时下载图片的并发数 */
@@ -32,6 +32,54 @@ const WHITE_FILL = 'FFFFFFFF';
 /** 表头/数据行高（pt） */
 const HEADER_ROW_HEIGHT = 30;
 const DATA_ROW_HEIGHT = 22;
+
+/** 双行合并组表头（与 DMS_DA 美化台账一致）：组名列横跨子列，子列名在第二行 */
+const MERGE_GROUPS = [
+  { groupName: '制约因素', fields: ['方案', '备件', '条件', '人员', '窗口'] },
+  { groupName: '消项确认记录', fields: ['消缺人', '班长', '消项时间'] },
+];
+/** 合并组子列统一列宽 */
+const GROUP_COL_WIDTH = 12;
+
+interface GroupInfo {
+  groupName: string;
+  /** 起止列索引（0-based，含） */
+  start: number;
+  end: number;
+}
+
+/** 在导出列中匹配合并组：按字段名定位，仅取连续列段 */
+function matchMergeGroups(columns: ExportColumn[]): GroupInfo[] {
+  const infos: GroupInfo[] = [];
+  for (const group of MERGE_GROUPS) {
+    const indices = columns
+      .map((col, idx) => (group.fields.includes(col.name) ? idx : -1))
+      .filter((idx) => idx >= 0);
+    if (!indices.length) continue;
+    let runStart = indices[0];
+    let prev = indices[0];
+    for (let k = 1; k <= indices.length; k += 1) {
+      const cur = indices[k];
+      if (cur !== prev + 1) {
+        infos.push({ groupName: group.groupName, start: runStart, end: prev });
+        runStart = cur;
+      }
+      prev = cur;
+    }
+  }
+  return infos;
+}
+
+/**
+ * 单元格文本统一出口：「计划期限」列只保留日期（到日），不显示时分。
+ */
+function formatCellText(record: IRecord, col: ExportColumn): string {
+  const text = cellToText(record.fields[col.id] ?? null, col.type);
+  if (col.name.includes('计划期限')) {
+    return text.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?$/, '');
+  }
+  return text;
+}
 
 function buildMatrix(columns: ExportColumn[], rows: IRecord[]): string[][] {
   return rows.map((record) =>
@@ -71,7 +119,8 @@ function setRowBorder(row: ExcelJSTypes.Row, color: string): void {
 
 /**
  * 构建带美化样式的工作簿（参考 DMS_DA「导出美化Excel」）：
- * 表头加粗浅灰蓝底、数据行斑马纹居中、细边框、列宽按内容自适应、冻结表头、自动筛选。
+ * 表头加粗浅灰蓝底（含「制约因素/消项确认记录」双行合并组表头）、数据行斑马纹居中、
+ * 细边框、列宽按内容自适应、冻结表头、自动筛选。
  * getText 决定每个单元格文本；attachmentColWidth 传入时附件列使用固定宽度（用于图片排版）。
  */
 async function buildStyledWorkbook(
@@ -80,23 +129,57 @@ async function buildStyledWorkbook(
   sheetName: string,
   getText: (record: IRecord, col: ExportColumn) => string,
   attachmentColWidth?: number,
-): Promise<ExcelJSTypes.Workbook> {
+): Promise<{ workbook: ExcelJSTypes.Workbook; headerRows: number }> {
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sanitizeSheetName(sheetName));
 
-  // 表头
-  const header = worksheet.addRow(columns.map((col) => col.name));
-  header.height = HEADER_ROW_HEIGHT;
-  header.font = { name: FONT_NAME, size: 12, bold: true, color: { argb: TEXT_COLOR } };
-  header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_FILL } };
-  header.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  setRowBorder(header, HEADER_BORDER);
+  // 匹配合并组（如「制约因素」「消项确认记录」），存在时使用双行表头
+  const groupInfos = matchMergeGroups(columns);
+  const hasGroups = groupInfos.length > 0;
+  const headerRows = hasGroups ? 2 : 1;
+  const groupColMap = new Map<number, GroupInfo>();
+  for (const group of groupInfos) {
+    for (let i = group.start; i <= group.end; i += 1) groupColMap.set(i, group);
+  }
 
-  // 列宽：按内容自适应（中文按 2 字符），上限 40；附件列可固定宽度
-  worksheet.columns = columns.map((col) => {
+  const headerStyle = {
+    font: { name: FONT_NAME, size: 12, bold: true, color: { argb: TEXT_COLOR } },
+    fill: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: HEADER_FILL } },
+    alignment: { horizontal: 'center' as const, vertical: 'middle' as const, wrapText: true },
+  };
+
+  // 第一行表头：组内首列显示组名（其余留空），非组列显示字段名
+  const header1 = worksheet.addRow(
+    columns.map((col, idx) => {
+      const group = groupColMap.get(idx);
+      if (group) return idx === group.start ? group.groupName : '';
+      return col.name;
+    }),
+  );
+  header1.height = HEADER_ROW_HEIGHT;
+  header1.font = headerStyle.font;
+  header1.fill = headerStyle.fill;
+  header1.alignment = headerStyle.alignment;
+  setRowBorder(header1, HEADER_BORDER);
+
+  // 第二行表头：组内列显示子字段名，其余留空（稍后与第一行纵向合并）
+  if (hasGroups) {
+    const header2 = worksheet.addRow(columns.map((col, idx) => (groupColMap.has(idx) ? col.name : '')));
+    header2.height = HEADER_ROW_HEIGHT;
+    header2.font = headerStyle.font;
+    header2.fill = headerStyle.fill;
+    header2.alignment = headerStyle.alignment;
+    setRowBorder(header2, HEADER_BORDER);
+  }
+
+  // 列宽：按内容自适应（中文按 2 字符），上限 40；附件列/合并组子列可固定宽度
+  worksheet.columns = columns.map((col, idx) => {
     if (col.type === FieldType.Attachment && attachmentColWidth) {
       return { width: attachmentColWidth };
+    }
+    if (groupColMap.has(idx)) {
+      return { width: GROUP_COL_WIDTH };
     }
     let maxLen = displayWidth(col.name);
     for (const record of rows) {
@@ -105,6 +188,20 @@ async function buildStyledWorkbook(
     }
     return { width: Math.min(40, Math.max(10, maxLen + 4)) };
   });
+
+  // 合并单元格：组名横向合并（第一行），非组列纵向合并（两行表头）
+  if (hasGroups) {
+    for (const group of groupInfos) {
+      if (group.end > group.start) {
+        worksheet.mergeCells(1, group.start + 1, 1, group.end + 1);
+      }
+    }
+    for (let idx = 0; idx < columns.length; idx += 1) {
+      if (!groupColMap.has(idx)) {
+        worksheet.mergeCells(1, idx + 1, 2, idx + 1);
+      }
+    }
+  }
 
   // 数据行：斑马纹 + 居中 + 细边框
   rows.forEach((record, idx) => {
@@ -121,22 +218,17 @@ async function buildStyledWorkbook(
   });
 
   // 冻结表头 + 自动筛选
-  worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  worksheet.views = [{ state: 'frozen', ySplit: headerRows }];
   worksheet.autoFilter = {
-    from: { row: 1, column: 1 },
-    to: { row: rows.length + 1, column: columns.length },
+    from: { row: headerRows, column: 1 },
+    to: { row: rows.length + headerRows, column: columns.length },
   };
 
-  return workbook;
+  return { workbook, headerRows };
 }
 
 async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Promise<Blob> {
-  const workbook = await buildStyledWorkbook(
-    columns,
-    rows,
-    sheetName,
-    (record, col) => cellToText(record.fields[col.id] ?? null, col.type),
-  );
+  const { workbook } = await buildStyledWorkbook(columns, rows, sheetName, formatCellText);
   const output = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
   return new Blob([output], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -284,14 +376,12 @@ export async function exportXlsxWithImages(
   sheetName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
-  const workbook = await buildStyledWorkbook(
+  const { workbook, headerRows } = await buildStyledWorkbook(
     columns,
     rows,
     sheetName,
     (record, col) =>
-      col.type === FieldType.Attachment
-        ? ''
-        : cellToText(record.fields[col.id] ?? null, col.type),
+      col.type === FieldType.Attachment ? '' : formatCellText(record, col),
     ATTACHMENT_COL_WIDTH,
   );
   const worksheet = workbook.worksheets[0];
@@ -305,13 +395,13 @@ export async function exportXlsxWithImages(
     if (col.type !== FieldType.Attachment) return;
     const perRecord = attachmentMap[col.id] ?? {};
     rows.forEach((record, rIdx) => {
-      const excelRow = rIdx + 2;
+      const excelRow = rIdx + headerRows + 1;
       const infos = perRecord[record.recordId];
       if (infos?.length) {
         jobs.push({ excelRow, colIndex, infos });
         totalImages += infos.length;
       } else {
-        const text = cellToText(record.fields[col.id] ?? null, col.type);
+        const text = formatCellText(record, col);
         if (text) fallbackTexts.set(`${excelRow}:${colIndex}`, text);
       }
     });
