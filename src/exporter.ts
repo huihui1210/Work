@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { FieldType } from '@lark-base-open/js-sdk';
 import type { IRecord } from '@lark-base-open/js-sdk';
 import { cellToText } from './bitable-helper';
@@ -8,16 +7,31 @@ import type * as ExcelJSTypes from 'exceljs';
 export type ExportFormat = 'xlsx' | 'csv' | 'json' | 'clipboard';
 
 /** 图片在单元格中的显示尺寸（px），限制在单元格宽度内 */
-const IMG_TARGET_WIDTH = 110;
-const IMG_MAX_HEIGHT = 80;
+const IMG_TARGET_WIDTH = 80;
+const IMG_MAX_HEIGHT = 60;
 /** 图片与单元格边缘、图片之间的间距（px） */
 const IMG_GAP = 4;
-/** 附件列列宽（Excel 字符单位，1 字符约 7px，16 字符约 117px > 图片宽 + 间距） */
-const ATTACHMENT_COL_WIDTH = 16;
+/** 附件列列宽（Excel 字符单位，1 字符约 7px，12 字符约 89px > 图片宽 + 间距） */
+const ATTACHMENT_COL_WIDTH = 12;
 /** px → EMU（ExcelJS 锚点偏移单位，1px = 9525 EMU） */
 const PX_TO_EMU = 9525;
 /** 同时下载图片的并发数 */
 const IMAGE_CONCURRENCY = 4;
+
+/* ===== 美化样式（参考 DMS_DA「导出美化Excel」） ===== */
+const FONT_NAME = '微软雅黑';
+/** 一级文字深灰蓝 */
+const TEXT_COLOR = 'FF2C3E50';
+/** 表头填充与边框 */
+const HEADER_FILL = 'FFDCE3E8';
+const HEADER_BORDER = 'FFB0BEC5';
+/** 数据行边框与斑马纹 */
+const DATA_BORDER = 'FFE0E0E0';
+const ZEBRA_FILL = 'FFF8F9FA';
+const WHITE_FILL = 'FFFFFFFF';
+/** 表头/数据行高（pt） */
+const HEADER_ROW_HEIGHT = 30;
+const DATA_ROW_HEIGHT = 22;
 
 function buildMatrix(columns: ExportColumn[], rows: IRecord[]): string[][] {
   return rows.map((record) =>
@@ -44,21 +58,86 @@ function sanitizeSheetName(name: string): string {
   return cleaned || 'Sheet1';
 }
 
-function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Blob {
-  const aoa: unknown[][] = [
-    columns.map((column) => column.name),
-    ...buildMatrix(columns, rows),
-  ];
-  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+/** 展示宽度：中文等全角字符按 2 个字符计 */
+function displayWidth(text: string): number {
+  return text.replace(/[^\x00-\xff]/g, 'XX').length;
+}
 
-  // 简单设置列宽，便于直接查看
-  worksheet['!cols'] = columns.map(
-    (column) => ({ wch: Math.min(40, Math.max(10, column.name.length * 2 + 2)) }),
+/** 统一设置行边框 */
+function setRowBorder(row: ExcelJSTypes.Row, color: string): void {
+  const side = { style: 'thin' as const, color: { argb: color } };
+  row.border = { top: side, bottom: side, left: side, right: side };
+}
+
+/**
+ * 构建带美化样式的工作簿（参考 DMS_DA「导出美化Excel」）：
+ * 表头加粗浅灰蓝底、数据行斑马纹居中、细边框、列宽按内容自适应、冻结表头、自动筛选。
+ * getText 决定每个单元格文本；attachmentColWidth 传入时附件列使用固定宽度（用于图片排版）。
+ */
+async function buildStyledWorkbook(
+  columns: ExportColumn[],
+  rows: IRecord[],
+  sheetName: string,
+  getText: (record: IRecord, col: ExportColumn) => string,
+  attachmentColWidth?: number,
+): Promise<ExcelJSTypes.Workbook> {
+  const ExcelJS = (await import('exceljs')).default;
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(sanitizeSheetName(sheetName));
+
+  // 表头
+  const header = worksheet.addRow(columns.map((col) => col.name));
+  header.height = HEADER_ROW_HEIGHT;
+  header.font = { name: FONT_NAME, size: 12, bold: true, color: { argb: TEXT_COLOR } };
+  header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_FILL } };
+  header.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  setRowBorder(header, HEADER_BORDER);
+
+  // 列宽：按内容自适应（中文按 2 字符），上限 40；附件列可固定宽度
+  worksheet.columns = columns.map((col) => {
+    if (col.type === FieldType.Attachment && attachmentColWidth) {
+      return { width: attachmentColWidth };
+    }
+    let maxLen = displayWidth(col.name);
+    for (const record of rows) {
+      const len = displayWidth(getText(record, col));
+      if (len > maxLen) maxLen = len;
+    }
+    return { width: Math.min(40, Math.max(10, maxLen + 4)) };
+  });
+
+  // 数据行：斑马纹 + 居中 + 细边框
+  rows.forEach((record, idx) => {
+    const row = worksheet.addRow(columns.map((col) => getText(record, col)));
+    row.height = DATA_ROW_HEIGHT;
+    row.font = { name: FONT_NAME, size: 11, color: { argb: TEXT_COLOR } };
+    row.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: idx % 2 === 0 ? ZEBRA_FILL : WHITE_FILL },
+    };
+    row.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
+    setRowBorder(row, DATA_BORDER);
+  });
+
+  // 冻结表头 + 自动筛选
+  worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  worksheet.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: rows.length + 1, column: columns.length },
+  };
+
+  return workbook;
+}
+
+async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Promise<Blob> {
+  const workbook = await buildStyledWorkbook(
+    columns,
+    rows,
+    sheetName,
+    (record, col) => cellToText(record.fields[col.id] ?? null, col.type),
   );
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(sheetName));
-  const output = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  const output = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
   return new Blob([output], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
@@ -112,12 +191,12 @@ export async function copyToClipboard(columns: ExportColumn[], rows: IRecord[]):
   textarea.remove();
 }
 
-export function buildFileBlob(
+export async function buildFileBlob(
   format: ExportFormat,
   columns: ExportColumn[],
   rows: IRecord[],
   sheetName: string,
-): Blob {
+): Promise<Blob> {
   switch (format) {
     case 'xlsx':
       return toXLSX(columns, rows, sheetName);
@@ -205,36 +284,17 @@ export async function exportXlsxWithImages(
   sheetName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
-  const ExcelJS = (await import('exceljs')).default;
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet(sanitizeSheetName(sheetName));
-
-  const attachmentColIds = new Set(
-    columns.filter((col) => col.type === FieldType.Attachment).map((col) => col.id),
-  );
-
-  // 表头
-  worksheet.addRow(columns.map((col) => col.name));
-  worksheet.getRow(1).font = { bold: true };
-  worksheet.getRow(1).alignment = { vertical: 'middle' };
-
-  // 列宽：附件列固定宽度，确保图片完全落在单元格内
-  worksheet.columns = columns.map((col) => ({
-    width: attachmentColIds.has(col.id)
-      ? ATTACHMENT_COL_WIDTH
-      : Math.min(40, Math.max(10, col.name.length * 2 + 2)),
-  }));
-
-  // 数据行文本（附件列先留空）
-  rows.forEach((record) => {
-    const values = columns.map((col) =>
+  const workbook = await buildStyledWorkbook(
+    columns,
+    rows,
+    sheetName,
+    (record, col) =>
       col.type === FieldType.Attachment
         ? ''
         : cellToText(record.fields[col.id] ?? null, col.type),
-    );
-    const row = worksheet.addRow(values);
-    row.alignment = { vertical: 'top', wrapText: true };
-  });
+    ATTACHMENT_COL_WIDTH,
+  );
+  const worksheet = workbook.worksheets[0];
 
   // 构建附件任务；无可用 URL 的单元格降级为文件名文本
   const fallbackTexts = new Map<string, string>();
@@ -315,9 +375,9 @@ export async function exportXlsxWithImages(
   });
   await Promise.all(workers);
 
-  // 根据图片高度设置行高（px → point：×0.75）
+  // 根据图片高度设置行高（px → point：×0.75），不低于标准数据行高
   for (const [excelRow, pixels] of rowPixelHeights) {
-    worksheet.getRow(excelRow).height = Math.max(20, pixels * 0.75 + 4);
+    worksheet.getRow(excelRow).height = Math.max(DATA_ROW_HEIGHT, pixels * 0.75 + 4);
   }
 
   // 图片锚定到所属单元格内部：单元格索引 + EMU 像素偏移（oneCellAnchor）

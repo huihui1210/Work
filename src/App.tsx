@@ -121,7 +121,7 @@ export default function App() {
         const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payloadRows));
 
         if (compressed.length > DMS_MAX_PAYLOAD_CHARS) {
-          const blob = buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'info',
@@ -139,7 +139,7 @@ export default function App() {
           });
           void refresh();
         } catch {
-          const blob = buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'error',
@@ -185,7 +185,7 @@ export default function App() {
             text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
           });
         } else {
-          const blob = buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'success',
@@ -196,7 +196,7 @@ export default function App() {
         return;
       }
 
-      const blob = buildFileBlob(format, data.columns, data.rows, data.viewName);
+      const blob = await buildFileBlob(format, data.columns, data.rows, data.viewName);
       downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, format));
       setMessage({ type: 'success', text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列）。` });
       void refresh();
