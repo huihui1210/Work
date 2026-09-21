@@ -196,7 +196,7 @@ export function cellToText(value: unknown, type: FieldType): string {
 
   if (Array.isArray(value)) return stringifyArray(value, type);
 
-  return stringifyObject(value, type);
+  return stringifyObject(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -251,7 +251,7 @@ function stringifyArray(arr: unknown[], type: FieldType): string {
   return arr.map((item) => cellToText(item, type)).filter(Boolean).join(', ');
 }
 
-function stringifyObject(obj: unknown, type: FieldType): string {
+function stringifyObject(obj: unknown): string {
   if (!isRecord(obj)) return String(obj ?? '');
 
   // 自动编号 { value, status }
@@ -276,7 +276,6 @@ function stringifyObject(obj: unknown, type: FieldType): string {
   // 其它对象兜底
   if ('text' in obj) return String(obj.text);
   if ('name' in obj) return String(obj.name);
-  void type;
   return '';
 }
 

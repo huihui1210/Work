@@ -1,141 +1,19 @@
 import type { IRecord } from '@lark-base-open/js-sdk';
-import { cellToText } from './bitable-helper';
 import type { ExportColumn } from './bitable-helper';
+import {
+  buildOrderModel,
+  resolveFields,
+  sortRows,
+  toRowMap,
+} from './work-order-core';
+import type { OrderModel } from './work-order-core';
 
 /**
  * 设备缺陷处理工单 PDF 生成（样式参考「工作派工单」模板）：
  * A4 一页上下两张工单、中间虚线分隔；全局黑白简约、无背景填充；
- * 严格按照字段显示——表格中不存在的字段不渲染；
- * 区域部位 / 设备名称 / 位号 与缺陷描述合并为一个「缺陷描述」单元格。
+ * 严格按照字段显示——表格中不存在的字段不渲染。
+ * 字段匹配与内容组装见 work-order-core，本文件只负责 DOM 渲染与截图。
  */
-
-export type RowMap = Record<string, string>;
-
-interface FieldDef {
-  key: string;
-  /** 匹配字段名的关键词（去空格、忽略大小写后包含匹配） */
-  match: string[];
-  /** 为 true 时按字段名完全相等匹配（避免「负责人」误匹配「消缺负责人」等） */
-  exact?: boolean;
-}
-
-/** 工单固定字段定义；未匹配到的字段作为独立行显示，不丢数据 */
-const FIELD_DEFS: FieldDef[] = [
-  { key: 'defectNo', match: ['缺陷编号', '缺陷单号', '工单编号', '工单号', '编号', 'id'] },
-  { key: 'finder', match: ['发现人', '上报人', '报告人'] },
-  { key: 'post', match: ['所属岗位', '岗位', '班值'] },
-  { key: 'level', match: ['分类定级', '缺陷等级', '定级', '分类', '等级'] },
-  { key: 'desc', match: ['缺陷描述', '缺陷内容', '设备缺陷', '描述'] },
-  { key: 'deadline', match: ['计划期限', '计划完成', '期限'] },
-  { key: 'repairNote', match: ['消缺情况', '处理情况', '消缺简记', '处理记录', '维修记录'] },
-  { key: 'partyMember', match: ['党员责任人'], exact: true },
-  { key: 'manager', match: ['负责人'], exact: true },
-  { key: 'handler', match: ['处理人'], exact: true },
-  { key: 'dept', match: ['责任部门'] },
-  { key: 'specialty', match: ['专业'], exact: true },
-  { key: 'risk', match: ['风险控制措施', '风险措施', '安全措施'] },
-  { key: 'repairer', match: ['消缺人'] },
-  { key: 'leader', match: ['班长', '班组长'] },
-  { key: 'closeTime', match: ['消项时间', '消缺完成日期', '完成日期', '消缺时间', '完成时间', '关闭时间'] },
-  { key: 'remark', match: ['备注', '说明'] },
-];
-
-/** 与缺陷描述合并显示的字段（区域部位 / 设备名称 / 位号） */
-const DESC_PART_FIELDS = ['区域部位', '设备名称', '位号', '区域', '位置'];
-
-/** 制约因素字段（填写形式显示） */
-export const CONSTRAINT_FIELDS = ['方案', '备件', '条件', '人员', '窗口'];
-
-function normalize(name: string): string {
-  return name.replace(/[\s/*\\]/g, '').toLowerCase();
-}
-
-/** 按字段名模糊匹配列 id */
-export function resolveFields(columns: ExportColumn[]): Record<string, string | undefined> {
-  const result: Record<string, string | undefined> = {};
-  const usedColumnIds = new Set<string>();
-
-  for (const def of FIELD_DEFS) {
-    const hit = columns.find((col) => {
-      if (usedColumnIds.has(col.id)) return false;
-      return def.match.some((keyword) =>
-        def.exact
-          ? normalize(col.name) === normalize(keyword)
-          : normalize(col.name).includes(normalize(keyword)),
-      );
-    });
-    if (hit) {
-      result[def.key] = hit.id;
-      usedColumnIds.add(hit.id);
-    }
-  }
-
-  // 制约因素
-  for (const name of CONSTRAINT_FIELDS) {
-    const hit = columns.find(
-      (col) => !usedColumnIds.has(col.id) && normalize(col.name).includes(normalize(name)),
-    );
-    if (hit) {
-      result[`constraint_${name}`] = hit.id;
-      usedColumnIds.add(hit.id);
-    }
-  }
-
-  // 是否类字段（是否消缺 / 是否逾期等）→ 勾选形式显示
-  const yesNoHits = columns.filter(
-    (col) => !usedColumnIds.has(col.id) && normalize(col.name).startsWith('是否'),
-  );
-  result.yesNoIds = JSON.stringify(yesNoHits.map((col) => col.id));
-  for (const col of yesNoHits) usedColumnIds.add(col.id);
-
-  // 缺陷描述合并来源字段（区域部位 / 设备名称 / 位号等）
-  const descPartHits = columns.filter(
-    (col) =>
-      !usedColumnIds.has(col.id) &&
-      DESC_PART_FIELDS.some((keyword) => normalize(col.name).includes(normalize(keyword))),
-  );
-  result.descPartIds = JSON.stringify(descPartHits.map((col) => col.id));
-  for (const col of descPartHits) usedColumnIds.add(col.id);
-
-  // 剩余字段作为其他信息
-  result.leftovers = JSON.stringify(
-    columns.filter((col) => !usedColumnIds.has(col.id)).map((col) => col.id),
-  );
-
-  return result;
-}
-
-export function toRowMap(columns: ExportColumn[], record: IRecord): RowMap {
-  const map: RowMap = {};
-  for (const column of columns) {
-    map[column.id] = cellToText(record.fields[column.id] ?? null, column.type).trim();
-  }
-  return map;
-}
-
-/** 从缺陷编号前 8 位解析发现日期 YYYY-MM-DD */
-export function parseDiscoverDate(defectNo: string): string {
-  const match = /^(\d{4})(\d{2})(\d{2})/.exec(defectNo);
-  if (!match) return '';
-  return `${match[1]}-${match[2]}-${match[3]}`;
-}
-
-/** 按缺陷编号升序排序（编号缺失时保持原顺序） */
-export function sortRows(rows: RowMap[], defectNoId: string | undefined): RowMap[] {
-  if (!defectNoId) return rows;
-  return rows
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const va = a.row[defectNoId];
-      const vb = b.row[defectNoId];
-      if (!va && !vb) return a.index - b.index;
-      if (!va) return 1;
-      if (!vb) return -1;
-      const cmp = va.localeCompare(vb, undefined, { numeric: true });
-      return cmp !== 0 ? cmp : a.index - b.index;
-    })
-    .map((item) => item.row);
-}
 
 /* ---------------- DOM 渲染 ---------------- */
 
@@ -175,40 +53,20 @@ function fieldRow(label: string, value: string, extraClass?: string): HTMLElemen
   return row;
 }
 
-/** 日期文本只保留到日（去掉时分） */
-export function dateOnly(text: string): string {
-  return text.replace(/[ T]\d{1,2}:\d{2}(:\d{2})?$/, '').trim();
-}
-
-/** 是否类字段 → 勾选文本：是/否 二选一勾选 */
-export function yesNoText(value: string): string {
-  const v = value.trim();
-  if (!v) return '';
-  const isYes = /^(是|已|完|y|true|1)/i.test(v);
-  return isYes ? '☑ 是　　☐ 否' : '☐ 是　　☑ 否';
-}
-
 function appendIf(parent: HTMLElement, child: HTMLElement | null): void {
   if (child) parent.append(child);
 }
 
-function renderOrder(
-  row: RowMap,
-  fieldIds: Record<string, string | undefined>,
-  columnsById: Map<string, ExportColumn>,
-): HTMLElement {
+function renderOrder(model: OrderModel): HTMLElement {
+  const { get } = model;
   const order = h('div', 'wo-order');
-  const get = (key: string) => (fieldIds[key] ? row[fieldIds[key]!] ?? '' : '');
-
-  const defectNo = get('defectNo');
-  const discoverDate = parseDiscoverDate(defectNo);
 
   // 公司抬头 + 标题 + 顶部信息（发现时间 / 编号，存在才显示）
   order.append(h('div', 'wo-company', '福建LNG接收站'));
   order.append(h('div', 'wo-title', '设备缺陷处理工单'));
   const topMeta = h('div', 'wo-topmeta');
-  if (discoverDate) topMeta.append(h('span', undefined, `发现时间：${discoverDate}`));
-  if (defectNo) topMeta.append(h('span', undefined, `编号：${defectNo}`));
+  if (model.discoverDate) topMeta.append(h('span', undefined, `发现时间：${model.discoverDate}`));
+  if (model.defectNo) topMeta.append(h('span', undefined, `编号：${model.defectNo}`));
   if (topMeta.childElementCount) order.append(topMeta);
 
   // 表格主体
@@ -234,17 +92,14 @@ function renderOrder(
   );
 
   // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格（左对齐、垂直居中）
-  const descPartIds: string[] = JSON.parse(fieldIds.descPartIds ?? '[]');
-  const parts = descPartIds.map((id) => row[id] ?? '').filter(Boolean);
-  const descText = [parts.join(' / '), get('desc')].filter(Boolean).join('　');
-  appendIf(table, fieldRow('缺陷描述', descText, 'wo-desc-value'));
+  appendIf(table, fieldRow('缺陷描述', model.descText, 'wo-desc-value'));
 
-  // 日期：计划期限 / 消项时间（只到日）
+  // 日期：计划期限 / 消项时间（只到日；空值对由 pairRow 自动过滤）
   appendIf(
     table,
     pairRow([
-      { label: '计划期限', value: dateOnly(get('deadline')) },
-      { label: '消项时间', value: dateOnly(get('closeTime')) },
+      { label: '计划期限', value: model.deadlineDate },
+      { label: '消项时间', value: model.closeDate },
     ]),
   );
 
@@ -258,17 +113,13 @@ function renderOrder(
     ]),
   );
 
-  // 是否类状态：勾选形式
-  const yesNoIds: string[] = JSON.parse(fieldIds.yesNoIds ?? '[]');
+  // 是否类状态：勾选形式（空值不显示）
   appendIf(
     table,
     pairRow(
-      yesNoIds
-        .map((id) => ({
-          label: columnsById.get(id)?.name ?? '状态',
-          value: yesNoText(row[id] ?? ''),
-        }))
-        .filter((pair) => pair.value),
+      model.yesNoItems
+        .filter((item) => item.value)
+        .map((item) => ({ label: item.name, value: item.value })),
     ),
   );
 
@@ -276,7 +127,7 @@ function renderOrder(
   appendIf(table, fieldRow('消缺处理情况', get('repairNote'), 'wo-repair-value wo-left'));
 
   // 风险控制措施 + 备注：一行（字段存在即显示，无值留空）
-  if (fieldIds.risk || fieldIds.remark) {
+  if (get('risk') || get('remark')) {
     appendIf(
       table,
       pairRow([
@@ -287,26 +138,16 @@ function renderOrder(
   }
 
   // 制约因素：填写形式（字段存在即显示整行，供填写；有值则带出）
-  const constraintItems = CONSTRAINT_FIELDS.filter((name) => fieldIds[`constraint_${name}`]);
-  if (constraintItems.length) {
-    const text = constraintItems
-      .map((name) => {
-        const v = get(`constraint_${name}`);
-        return v ? `${name}：${v}` : `${name}：`;
-      })
-      .join('　　');
+  if (model.constraintItems.length) {
     const rowEl = h('div', 'wo-row');
     rowEl.append(h('div', 'wo-label', '制约因素'));
-    rowEl.append(h('div', 'wo-value wo-left', text || '　'));
+    rowEl.append(h('div', 'wo-value wo-left', model.constraintText || '　'));
     table.append(rowEl);
   }
 
   // 其他信息：未归入固定位置且有值的字段，逐行显示
-  const leftoverIds: string[] = JSON.parse(fieldIds.leftovers ?? '[]');
-  for (const id of leftoverIds) {
-    const value = (row[id] ?? '').trim();
-    if (!value) continue;
-    appendIf(table, fieldRow(columnsById.get(id)?.name ?? '其他', value, 'wo-left'));
+  for (const item of model.leftovers) {
+    appendIf(table, fieldRow(item.name, item.value, 'wo-left'));
   }
 
   // 签字区（表单固定结构，始终显示）：消缺人 / 班长；姓名手写体，日期显示消项日期
@@ -315,14 +156,13 @@ function renderOrder(
     { role: '消缺人', name: get('repairer') },
     { role: '班长', name: get('leader') },
   ];
-  const closeDate = dateOnly(get('closeTime'));
   signCells.forEach((item, idx) => {
     const cell = h('div', 'wo-sign-cell');
     if (idx < signCells.length - 1) cell.classList.add('wo-bordered');
     const top = h('div', 'wo-sign-top', `${item.role}签字：`);
     if (item.name) top.append(h('span', 'wo-handwriting', item.name));
     cell.append(top);
-    cell.append(h('div', 'wo-sign-bottom', `日期：${closeDate || '　　　年　　月　　日'}`));
+    cell.append(h('div', 'wo-sign-bottom', `日期：${model.closeDate || '　　　年　　月　　日'}`));
     signRow.append(cell);
   });
   table.append(signRow);
@@ -385,19 +225,18 @@ export async function buildWorkOrderPdfBlob(
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
   const fieldIds = resolveFields(columns);
+  const columnsById = new Map(columns.map((col) => [col.id, col]));
   const rowMaps = sortRows(
     rows.map((record) => toRowMap(columns, record)),
     fieldIds.defectNo,
   );
+  const orders = rowMaps.map((row) => renderOrder(buildOrderModel(row, fieldIds, columnsById)));
 
   // 离屏容器
   const root = h('div', 'wo-root');
   const style = document.createElement('style');
   style.textContent = WO_STYLES;
   root.append(style);
-
-  const columnsById = new Map(columns.map((col) => [col.id, col]));
-  const orders = rowMaps.map((row) => renderOrder(row, fieldIds, columnsById));
 
   // 一页 A4 放两张工单，中间虚线分隔；奇数张时下半区留空占位（工单只占上半区）
   const pages: HTMLElement[] = [];

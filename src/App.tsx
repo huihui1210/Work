@@ -123,8 +123,7 @@ export default function App() {
         const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payloadRows));
 
         if (compressed.length > DMS_MAX_PAYLOAD_CHARS) {
-          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
-          downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
+          await downloadSelectedAsXlsx(data);
           setMessage({
             type: 'info',
             text: `勾选数据较多（${data.rows.length} 条），已自动改为下载 Excel，请在缺陷系统中手动导入该文件。`,
@@ -141,8 +140,7 @@ export default function App() {
           });
           void refresh();
         } catch {
-          const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
-          downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
+          await downloadSelectedAsXlsx(data);
           setMessage({
             type: 'error',
             text: '无法自动打开缺陷系统，已改为下载 Excel，请手动导入。',
@@ -319,6 +317,14 @@ export default function App() {
       </p>
     </div>
   );
+}
+
+/** DMS 发送失败或数据过大时的兜底：下载美化 Excel 供手动导入 */
+async function downloadSelectedAsXlsx(
+  data: Awaited<ReturnType<typeof getSelectedData>>,
+): Promise<void> {
+  const blob = await buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+  downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
 }
 
 /** 判断两次读取的选中状态是否一致，避免轮询造成无谓的界面刷新 */

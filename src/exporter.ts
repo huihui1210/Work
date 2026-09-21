@@ -4,7 +4,7 @@ import { cellToText } from './bitable-helper';
 import type { AttachmentInfo, AttachmentMap, ExportColumn } from './bitable-helper';
 import type * as ExcelJSTypes from 'exceljs';
 
-export type ExportFormat = 'xlsx' | 'csv' | 'json' | 'clipboard';
+export type ExportFormat = 'xlsx' | 'csv';
 
 /** 图片在单元格中的显示尺寸（px），限制在单元格宽度内 */
 const IMG_TARGET_WIDTH = 64;
@@ -235,17 +235,6 @@ async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: strin
   });
 }
 
-function toJSON(columns: ExportColumn[], rows: IRecord[]): Blob {
-  const data = rows.map((record) => {
-    const obj: Record<string, string> = {};
-    for (const column of columns) {
-      obj[column.name] = cellToText(record.fields[column.id] ?? null, column.type);
-    }
-    return obj;
-  });
-  return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
-}
-
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -257,48 +246,14 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/**
- * 以制表符分隔复制（TSV），可直接粘贴进 Excel / 表格
- */
-export async function copyToClipboard(columns: ExportColumn[], rows: IRecord[]): Promise<void> {
-  const tsvEscape = (value: string) => value.replace(/\t/g, ' ').replace(/[\r\n]+/g, ' ');
-  const lines = [
-    columns.map((column) => tsvEscape(column.name)).join('\t'),
-    ...buildMatrix(columns, rows).map((line) => line.map(tsvEscape).join('\t')),
-  ];
-  const text = lines.join('\r\n');
-
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand('copy');
-  textarea.remove();
-}
-
 export async function buildFileBlob(
   format: ExportFormat,
   columns: ExportColumn[],
   rows: IRecord[],
   sheetName: string,
 ): Promise<Blob> {
-  switch (format) {
-    case 'xlsx':
-      return toXLSX(columns, rows, sheetName);
-    case 'csv':
-      return toCSV(columns, rows);
-    case 'json':
-      return toJSON(columns, rows);
-    default:
-      throw new Error(`unsupported format: ${format}`);
-  }
+  if (format === 'csv') return toCSV(columns, rows);
+  return toXLSX(columns, rows, sheetName);
 }
 
 type SupportedImageExt = 'jpeg' | 'png' | 'gif';
