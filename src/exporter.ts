@@ -328,10 +328,11 @@ export async function exportXlsxWithImages(
     });
     worksheet.addImage(imageId, {
       tl: {
-        col: img.colIndex,
-        row: img.excelRow - 1,
-        nativeCol: IMG_GAP * PX_TO_EMU,
-        nativeRow: img.offsetY * PX_TO_EMU,
+        // ExcelJS 约定：nativeCol/nativeRow 为单元格索引，nativeColOff/nativeRowOff 为 EMU 像素偏移
+        nativeCol: img.colIndex,
+        nativeColOff: IMG_GAP * PX_TO_EMU,
+        nativeRow: img.excelRow - 1,
+        nativeRowOff: img.offsetY * PX_TO_EMU,
       } as unknown as ExcelJSTypes.Anchor,
       ext: { width: img.width, height: img.height },
     });
