@@ -236,7 +236,7 @@ function renderOrder(
   // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格（左对齐、垂直居中）
   const descPartIds: string[] = JSON.parse(fieldIds.descPartIds ?? '[]');
   const parts = descPartIds.map((id) => row[id] ?? '').filter(Boolean);
-  const descText = [parts.join(' / '), get('desc')].filter(Boolean).join('\n');
+  const descText = [parts.join(' / '), get('desc')].filter(Boolean).join('　');
   appendIf(table, fieldRow('缺陷描述', descText, 'wo-desc-value'));
 
   // 日期：计划期限 / 消项时间（只到日）
@@ -360,7 +360,7 @@ const WO_STYLES = `
 }
 .wo-left { justify-content: flex-start; text-align: left; align-items: flex-start; }
 .wo-bordered { border-right: 1px solid #333; }
-.wo-desc-value { justify-content: flex-start; text-align: left; min-height: 78px; }
+.wo-desc-value { justify-content: flex-start; text-align: left; min-height: 34px; }
 .wo-repair-value { min-height: 56px; }
 .wo-sign-cell {
   flex: 1; display: flex; flex-direction: column; justify-content: center;
@@ -422,11 +422,11 @@ export async function buildWorkOrderPdfBlob(
 
     for (let i = 0; i < pages.length; i++) {
       const canvas = await html2canvas.default(pages[i], {
-        scale: 2,
+        scale: 3,
         backgroundColor: '#ffffff',
         useCORS: true,
       });
-      const image = canvas.toDataURL('image/jpeg', 0.92);
+      const image = canvas.toDataURL('image/jpeg', 0.98);
       if (i > 0) pdf.addPage();
       pdf.addImage(image, 'JPEG', 0, 0, pageWidth, pageHeight);
       onProgress?.(i + 1, pages.length);
