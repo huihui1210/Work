@@ -305,5 +305,9 @@ function errorToMessage(error: unknown): string {
   if (error instanceof ExportError && error.code === 'NO_CONTEXT') {
     return '请先在多维表格中打开一个数据表和视图。';
   }
-  return '导出失败，请确认插件运行在多维表格边栏中，且你对这些记录有查看权限。';
+  console.error('[一键导出] 导出失败，原始错误：', error);
+  const detail = error instanceof Error ? error.message : String(error ?? '');
+  return detail
+    ? `导出失败：${detail}`
+    : '导出失败，请确认插件运行在多维表格边栏中，且你对这些记录有查看权限。';
 }
