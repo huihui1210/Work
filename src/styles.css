@@ -1,3 +1,10 @@
+/*
+ * 基于《Base 开放设计规范》统一排版：
+ * 中性色 N900 #1F2329 / N600 #646A73 / N500 #8F959E / N400 #BBBFC4 /
+ *       N300 #DEE0E3（卡片描边）/ N100 #F5F6F7（页面底）/ N00 #FFFFFF
+ * 功能色 Info B500 #3370FF / Success G500 #34C724 / Error R500 #F54A45 / Warning O500 #FF8800
+ * 按钮圆角 4px，间距遵循 4 的倍数，主按钮高度 40px
+ */
 * {
   box-sizing: border-box;
 }
@@ -9,8 +16,8 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Tahoma, 'PingFang SC',
+    'Microsoft Yahei', Arial, 'Hiragino Sans GB', sans-serif;
   background: #f5f6f7;
   color: #1f2329;
   font-size: 14px;
@@ -34,8 +41,8 @@ body {
 .header-icon {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
-  background: #1f2329;
+  border-radius: 8px;
+  background: #3370ff;
   color: #fff;
   display: flex;
   align-items: center;
@@ -48,6 +55,7 @@ body {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  color: #1f2329;
 }
 
 .subtitle {
@@ -56,12 +64,12 @@ body {
   color: #8f959e;
 }
 
-/* Card */
+/* Card：描边 N300，背景 N00 */
 .card {
   background: #fff;
-  border-radius: 10px;
-  padding: 14px;
-  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #dee0e3;
 }
 
 .card-top {
@@ -86,6 +94,7 @@ body {
 }
 
 .text-btn:hover {
+  color: #2b5fd9;
   text-decoration: underline;
 }
 
@@ -93,18 +102,18 @@ body {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin: 10px 0 6px;
+  margin: 12px 0 8px;
 }
 
 .count-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 34px;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: #e8f0ff;
+  min-width: 36px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: #f0f5ff;
   color: #245bdb;
   font-size: 18px;
   font-weight: 600;
@@ -125,37 +134,38 @@ body {
 .hint {
   margin: 8px 0 0;
   font-size: 12px;
-  color: #d83931;
+  color: #f54a45;
 }
 
-/* Format options */
+/* Format options：可交互控件描边 N400，选中态蓝色强调 */
 .format-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .format-item {
-  border: 1px solid #dee0e3;
+  border: 1px solid #bbbfc4;
   background: #fff;
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 4px;
+  padding: 12px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 4px;
   transition: all 0.15s;
 }
 
 .format-item:hover {
-  border-color: #1f2329;
+  border-color: #3370ff;
+  background: rgba(31, 35, 41, 0.05);
 }
 
 .format-item.active {
-  background: #1f2329;
-  border-color: #1f2329;
+  background: #f0f5ff;
+  border-color: #3370ff;
 }
 
 .format-name {
@@ -169,65 +179,102 @@ body {
   color: #8f959e;
 }
 
-.format-item.active .format-name,
-.format-item.active .format-desc {
-  color: #fff;
+.format-item.active .format-name {
+  color: #245bdb;
 }
 
-/* Primary button: dark on light background */
+.format-item.active .format-desc {
+  color: #646a73;
+}
+
+/* 复选框：是否同时导出附件图片 */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #3370ff;
+  cursor: pointer;
+}
+
+.checkbox-text {
+  font-size: 13px;
+  color: #1f2329;
+}
+
+.checkbox-hint {
+  font-size: 12px;
+  color: #8f959e;
+}
+
+/* Primary button：主要按钮 B500，圆角 4px，高度 40px（大尺寸） */
 .primary-btn {
   width: 100%;
-  height: 44px;
+  height: 40px;
   border: none;
-  border-radius: 10px;
-  background: #1f2329;
+  border-radius: 4px;
+  background: #3370ff;
   color: #fff;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
+  white-space: nowrap;
 }
 
 .primary-btn:hover {
-  background: #000;
+  background: #2b5fd9;
+}
+
+.primary-btn:active {
+  background: #245bdb;
 }
 
 .primary-btn:disabled {
-  background: #8f959e;
+  background: #bbbfc4;
   cursor: not-allowed;
 }
 
-/* Banners */
+/* Banners：功能色语义 */
 .banner {
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 4px;
+  padding: 8px 12px;
   font-size: 12px;
   line-height: 1.6;
 }
 
 .banner-success {
-  background: #eef8ee;
+  background: #e8ffea;
   color: #2ea121;
 }
 
 .banner-error {
-  background: #fef1f0;
-  color: #d83931;
+  background: #ffece8;
+  color: #f54a45;
 }
 
 .banner-info {
-  background: #e8f0ff;
+  background: #f0f5ff;
   color: #245bdb;
 }
 
 .banner-warning {
-  background: #fff7e6;
-  color: #b76500;
+  background: #fff4e5;
+  color: #d25f00;
 }
 
 .tips {
   margin: 0;
   font-size: 11px;
-  color: #a0a4ab;
+  color: #8f959e;
   line-height: 1.7;
 }

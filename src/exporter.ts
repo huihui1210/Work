@@ -7,10 +7,15 @@ import type * as ExcelJSTypes from 'exceljs';
 
 export type ExportFormat = 'xlsx' | 'csv' | 'json' | 'clipboard';
 
-/** 图片在单元格中的显示尺寸（px） */
-const IMG_TARGET_WIDTH = 220;
-const IMG_MAX_HEIGHT = 170;
-const IMG_GAP = 6;
+/** 图片在单元格中的显示尺寸（px），限制在单元格宽度内 */
+const IMG_TARGET_WIDTH = 110;
+const IMG_MAX_HEIGHT = 80;
+/** 图片与单元格边缘、图片之间的间距（px） */
+const IMG_GAP = 4;
+/** 附件列列宽（Excel 字符单位，1 字符约 7px，16 字符约 117px > 图片宽 + 间距） */
+const ATTACHMENT_COL_WIDTH = 16;
+/** px → EMU（ExcelJS 锚点偏移单位，1px = 9525 EMU） */
+const PX_TO_EMU = 9525;
 /** 同时下载图片的并发数 */
 const IMAGE_CONCURRENCY = 4;
 
@@ -176,8 +181,21 @@ interface CellImageJob {
   infos: AttachmentInfo[];
 }
 
+/** 已下载待放置的图片（统一排版，保证锚定在所属单元格内） */
+interface PlacedImage {
+  excelRow: number;
+  colIndex: number;
+  buffer: ArrayBuffer;
+  ext: SupportedImageExt;
+  width: number;
+  height: number;
+  /** 相对单元格顶部的像素偏移 */
+  offsetY: number;
+}
+
 /**
  * 导出内嵌真实图片的 xlsx（附件列）。
+ * 图片按单元格等比缩放、纵向排列并锁定在所属单元格内；
  * 附件取 URL 失败或格式不支持（如 webp）时，该格降级显示文件名。
  */
 export async function exportXlsxWithImages(
@@ -200,10 +218,10 @@ export async function exportXlsxWithImages(
   worksheet.getRow(1).font = { bold: true };
   worksheet.getRow(1).alignment = { vertical: 'middle' };
 
-  // 列宽：附件列加宽
+  // 列宽：附件列固定宽度，确保图片完全落在单元格内
   worksheet.columns = columns.map((col) => ({
     width: attachmentColIds.has(col.id)
-      ? 34
+      ? ATTACHMENT_COL_WIDTH
       : Math.min(40, Math.max(10, col.name.length * 2 + 2)),
   }));
 
@@ -239,7 +257,8 @@ export async function exportXlsxWithImages(
     });
   });
 
-  // 每个数据行需要的像素高度（多附件列取最大值）
+  // 先并发下载收集全部图片，再统一排版，避免锚点依赖未定的行高
+  const placed: PlacedImage[] = [];
   const rowPixelHeights = new Map<number, number>();
   let done = 0;
 
@@ -258,19 +277,14 @@ export async function exportXlsxWithImages(
           );
           const width = Math.round(image.width * scale);
           const height = Math.round(image.height * scale);
-
-          const imageId = workbook.addImage({
-            buffer: image.buffer as never,
-            extension: image.ext,
-          });
-          worksheet.addImage(imageId, {
-            tl: {
-              col: job.colIndex,
-              row: job.excelRow - 1,
-              nativeCol: 0,
-              nativeRow: y,
-            } as unknown as ExcelJSTypes.Anchor,
-            ext: { width, height },
+          placed.push({
+            excelRow: job.excelRow,
+            colIndex: job.colIndex,
+            buffer: image.buffer,
+            ext: image.ext,
+            width,
+            height,
+            offsetY: y,
           });
           y += height + IMG_GAP;
         } else {
@@ -283,11 +297,11 @@ export async function exportXlsxWithImages(
       onProgress?.(done, totalImages);
     }
 
-    const prevHeight = rowPixelHeights.get(job.excelRow) ?? 0;
-    if (y > prevHeight) rowPixelHeights.set(job.excelRow, y);
     if (failedNames.length) {
       fallbackTexts.set(`${job.excelRow}:${job.colIndex}`, failedNames.join(', '));
     }
+    const prevHeight = rowPixelHeights.get(job.excelRow) ?? 0;
+    if (y > prevHeight) rowPixelHeights.set(job.excelRow, y);
   };
 
   // 并发池
@@ -301,15 +315,32 @@ export async function exportXlsxWithImages(
   });
   await Promise.all(workers);
 
+  // 根据图片高度设置行高（px → point：×0.75）
+  for (const [excelRow, pixels] of rowPixelHeights) {
+    worksheet.getRow(excelRow).height = Math.max(20, pixels * 0.75 + 4);
+  }
+
+  // 图片锚定到所属单元格内部：单元格索引 + EMU 像素偏移（oneCellAnchor）
+  for (const img of placed) {
+    const imageId = workbook.addImage({
+      buffer: img.buffer as never,
+      extension: img.ext,
+    });
+    worksheet.addImage(imageId, {
+      tl: {
+        col: img.colIndex,
+        row: img.excelRow - 1,
+        nativeCol: IMG_GAP * PX_TO_EMU,
+        nativeRow: img.offsetY * PX_TO_EMU,
+      } as unknown as ExcelJSTypes.Anchor,
+      ext: { width: img.width, height: img.height },
+    });
+  }
+
   // 降级文本写入
   for (const [key, text] of fallbackTexts) {
     const [excelRow, colIndex] = key.split(':').map(Number);
     worksheet.getRow(excelRow).getCell(colIndex + 1).value = text;
-  }
-
-  // 根据图片高度设置行高（px → point：×0.75）
-  for (const [excelRow, pixels] of rowPixelHeights) {
-    worksheet.getRow(excelRow).height = Math.max(20, pixels * 0.75 + 4);
   }
 
   const output = (await workbook.xlsx.writeBuffer()) as BlobPart;

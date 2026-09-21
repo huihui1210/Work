@@ -30,7 +30,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
   { value: 'csv', label: 'CSV', desc: '.csv 通用' },
   { value: 'pdf', label: '工单PDF', desc: '缺陷处理工单' },
-  { value: 'dms', label: '缺陷分析', desc: '一键发送' },
+  { value: 'dms', label: '缺陷分析系统', desc: '一键发送' },
 ];
 
 type MessageType = 'success' | 'error' | 'info';
@@ -40,6 +40,7 @@ export default function App() {
   const [checking, setChecking] = useState(true);
   const [notInHost, setNotInHost] = useState(false);
   const [format, setFormat] = useState<AppFormat>('xlsx');
+  const [withImages, setWithImages] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
 
@@ -163,25 +164,34 @@ export default function App() {
       }
 
       if (format === 'xlsx') {
-        setMessage({ type: 'info', text: '正在读取缺陷图片…' });
-        const attachmentMap = await getAttachmentMap(data.columns, data.rows);
-        const blob = await exportXlsxWithImages(
-          data.columns,
-          data.rows,
-          attachmentMap,
-          data.viewName,
-          (done, total) =>
-            setMessage(
-              total
-                ? { type: 'info', text: `正在下载缺陷图片（${done}/${total}）…` }
-                : { type: 'info', text: '正在生成 Excel…' },
-            ),
-        );
-        downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
-        setMessage({
-          type: 'success',
-          text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
-        });
+        if (withImages) {
+          setMessage({ type: 'info', text: '正在读取缺陷图片…' });
+          const attachmentMap = await getAttachmentMap(data.columns, data.rows);
+          const blob = await exportXlsxWithImages(
+            data.columns,
+            data.rows,
+            attachmentMap,
+            data.viewName,
+            (done, total) =>
+              setMessage(
+                total
+                  ? { type: 'info', text: `正在下载缺陷图片（${done}/${total}）…` }
+                  : { type: 'info', text: '正在生成 Excel…' },
+              ),
+          );
+          downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
+          setMessage({
+            type: 'success',
+            text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
+          });
+        } else {
+          const blob = buildFileBlob('xlsx', data.columns, data.rows, data.viewName);
+          downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
+          setMessage({
+            type: 'success',
+            text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列）。`,
+          });
+        }
         void refresh();
         return;
       }
@@ -247,22 +257,32 @@ export default function App() {
             </button>
           ))}
         </div>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={withImages}
+            onChange={(e) => setWithImages(e.target.checked)}
+          />
+          <span className="checkbox-text">同时导出附件图片</span>
+          <span className="checkbox-hint">仅 Excel 格式生效，默认关闭</span>
+        </label>
       </section>
 
       <button type="button" className="primary-btn" disabled={exporting} onClick={() => void handleExport()}>
         {exporting
           ? '处理中…'
           : format === 'dms'
-            ? '一键发送到缺陷分析'
+            ? '一键发送到缺陷分析系统'
             : format === 'pdf'
-              ? '一键导出工单PDF'
+              ? '一键导出'
               : '一键导出'}
       </button>
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
 
       <p className="tips">
-        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。仅导出当前视图可见的列，数据不会离开当前页面。
+        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。勾选「同时导出附件图片」可在
+        Excel 中内嵌缺陷图片。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
     </div>
   );
