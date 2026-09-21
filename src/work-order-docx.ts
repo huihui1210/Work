@@ -36,8 +36,8 @@ const GRID = [1500, 1989, 1500, 1989, 1500, 1988];
 
 const BORDER = { style: BorderStyle.SINGLE, size: 4, color: '333333' };
 const CELL_BORDERS = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
-const BODY_SIZE = 21; // 10.5pt
-const LABEL_SIZE = 21;
+const BODY_SIZE = 18; // 9pt，与 PDF 工单 12px 视觉一致
+const LABEL_SIZE = 18;
 
 interface CellSpec {
   text?: string;
@@ -67,10 +67,11 @@ function makeCell(spec: CellSpec): TableCell {
     width: { size: spec.width, type: WidthType.DXA },
     borders: CELL_BORDERS,
     verticalAlign: VerticalAlign.CENTER,
-    margins: { top: 60, bottom: 60, left: 80, right: 80 },
+    margins: { top: 30, bottom: 30, left: 70, right: 70 },
     children: [
       new Paragraph({
         alignment: spec.align ?? AlignmentType.CENTER,
+        spacing: { before: 0, after: 0, line: 260 },
         children: runs,
       }),
     ],
@@ -134,19 +135,19 @@ function buildOrderChildren(
         new TextRun({
           text: '福建LNG接收站',
           bold: true,
-          size: 28,
+          size: 24,
           font: { ascii: '微软雅黑', eastAsia: '微软雅黑', hAnsi: '微软雅黑' },
         }),
       ],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 0, after: 80 },
+      spacing: { before: 0, after: 40 },
       children: [
         new TextRun({
           text: '设备缺陷处理工单',
           bold: true,
-          size: 40,
+          size: 32,
           font: { ascii: '微软雅黑', eastAsia: '微软雅黑', hAnsi: '微软雅黑' },
         }),
       ],
@@ -211,7 +212,7 @@ function buildOrderChildren(
   if (discoverDate || defectNo) {
     children.push(
       new Paragraph({
-        spacing: { before: 20, after: 20 },
+        spacing: { before: 10, after: 10 },
         children: [new TextRun({ text: '', size: 2 })],
       }),
     );
@@ -232,13 +233,13 @@ function buildOrderChildren(
         makeCell({ text: '所属岗位', width: c4, bold: true }),
         makeCell({ text: get('post'), width: c5 }),
       ],
-      400,
+      300,
     ),
   );
 
   // 部门与专业
-  const deptCell = labelValue('责任部门', get('dept'), c0, c1 + c2 + c3, 3, 400);
-  const specCell = labelValue('专业', get('specialty'), c4, c5, undefined, 400);
+  const deptCell = labelValue('责任部门', get('dept'), c0, c1 + c2 + c3, 3, 300);
+  const specCell = labelValue('专业', get('specialty'), c4, c5, undefined, 300);
   rows.push(makeRow([...deptCell, ...specCell]));
 
   // 缺陷描述（区域部位 / 设备名称 / 位号 合并一行）
@@ -248,14 +249,14 @@ function buildOrderChildren(
   rows.push(
     makeRow(
       [makeCell({ text: '缺陷描述', width: c0, bold: true }), makeCell({ text: descText, width: c1 + c2 + c3 + c4 + c5, span: 5, align: AlignmentType.CENTER })],
-      560,
+      420,
     ),
   );
 
   // 日期：计划期限 / 消项时间（只到日）
   if (fieldIds.deadline || fieldIds.closeTime) {
-    const a = labelValue('计划期限', dateOnly(get('deadline')), c0, c1 + c2, 2, 400);
-    const b = labelValue('消项时间', closeDate, c3, c4 + c5, 2, 400);
+    const a = labelValue('计划期限', dateOnly(get('deadline')), c0, c1 + c2, 2, 300);
+    const b = labelValue('消项时间', closeDate, c3, c4 + c5, 2, 300);
     rows.push(makeRow([a[0], a[1], b[0], b[1]]));
   }
 
@@ -290,11 +291,11 @@ function buildOrderChildren(
       }
       : null;
     if (second) {
-      const a = labelValue(first.name, first.value, c0, c1 + c2, 2, 400);
-      const b = labelValue(second.name, second.value, c3, c4 + c5, 2, 400);
+      const a = labelValue(first.name, first.value, c0, c1 + c2, 2, 300);
+      const b = labelValue(second.name, second.value, c3, c4 + c5, 2, 300);
       rows.push(makeRow([a[0], a[1], b[0], b[1]]));
     } else {
-      rows.push(makeRow(labelValue(first.name, first.value, c0, c1 + c2 + c3 + c4 + c5, 5, 400)));
+      rows.push(makeRow(labelValue(first.name, first.value, c0, c1 + c2 + c3 + c4 + c5, 5, 300)));
     }
   }
 
@@ -307,15 +308,15 @@ function buildOrderChildren(
           makeCell({ text: '消缺处理情况', width: c0, bold: true }),
           makeCell({ text: repairText, width: c1 + c2 + c3 + c4 + c5, span: 5, align: AlignmentType.LEFT }),
         ],
-        700,
+        420,
       ),
     );
   }
 
   // 风险控制措施 + 备注
   if (fieldIds.risk || fieldIds.remark) {
-    const a = labelValue('风险控制措施', get('risk'), c0, c1 + c2, 2, 400);
-    const b = labelValue('备注', get('remark'), c3, c4 + c5, 2, 400);
+    const a = labelValue('风险控制措施', get('risk'), c0, c1 + c2, 2, 300);
+    const b = labelValue('备注', get('remark'), c3, c4 + c5, 2, 300);
     rows.push(makeRow([a[0], a[1], b[0], b[1]]));
   }
 
@@ -375,7 +376,7 @@ function buildOrderChildren(
           paraChildren.push(
             new TextRun({
               text: item.name,
-              size: 26,
+              size: 22,
               font: { ascii: '楷体', eastAsia: '楷体', hAnsi: '楷体' },
             }),
           );
@@ -385,11 +386,16 @@ function buildOrderChildren(
           width: { size: c0 + c1 + c2, type: WidthType.DXA },
           borders: CELL_BORDERS,
           verticalAlign: VerticalAlign.CENTER,
-          margins: { top: 60, bottom: 60, left: 80, right: 80 },
+          margins: { top: 30, bottom: 30, left: 70, right: 70 },
           children: [
-            new Paragraph({ alignment: AlignmentType.CENTER, children: paraChildren }),
             new Paragraph({
               alignment: AlignmentType.CENTER,
+              spacing: { before: 0, after: 20, line: 260 },
+              children: paraChildren,
+            }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 0, after: 0, line: 260 },
               children: [
                 new TextRun({
                   text: `日期：${closeDate || '　　　年　　月　　日'}`,
@@ -401,7 +407,7 @@ function buildOrderChildren(
           ],
         });
       }),
-      760,
+      560,
     ),
   );
 
@@ -425,7 +431,7 @@ function buildOrderChildren(
   if (orderIndex % 2 === 0) {
     children.push(
       new Paragraph({
-        spacing: { before: 80, after: 80 },
+        spacing: { before: 40, after: 40 },
         border: { bottom: { style: BorderStyle.DASHED, size: 6, color: '888888', space: 1 } },
         children: [new TextRun({ text: '', size: 2 })],
       }),
@@ -470,7 +476,7 @@ export async function buildWorkOrderDocxBlob(
         properties: {
           page: {
             size: { width: 11906, height: 16838 },
-            margin: { top: 720, bottom: 720, left: 720, right: 720 },
+            margin: { top: 567, bottom: 567, left: 720, right: 720 },
           },
         },
         children,
