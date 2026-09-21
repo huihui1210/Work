@@ -91,7 +91,7 @@ function renderOrder(model: OrderModel): HTMLElement {
     ]),
   );
 
-  // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格（左对齐、垂直居中）
+  // 缺陷描述：区域部位 / 设备名称 / 位号 与缺陷描述合并为一个单元格（水平/垂直居中）
   appendIf(table, fieldRow('缺陷描述', model.descText, 'wo-desc-value'));
 
   // 日期：计划期限 / 消项时间（只到日；空值对由 pairRow 自动过滤）
@@ -203,7 +203,7 @@ const WO_STYLES = `
 }
 .wo-left { justify-content: flex-start; text-align: left; align-items: flex-start; }
 .wo-bordered { border-right: 1px solid #333; }
-.wo-desc-value { justify-content: flex-start; text-align: left; min-height: 34px; }
+.wo-desc-value { min-height: 34px; }
 .wo-repair-value { min-height: 56px; }
 .wo-sign-cell {
   flex: 1; display: flex; flex-direction: column; justify-content: center;

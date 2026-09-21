@@ -82,9 +82,8 @@ function formatCellText(record: IRecord, col: ExportColumn): string {
 }
 
 function buildMatrix(columns: ExportColumn[], rows: IRecord[]): string[][] {
-  return rows.map((record) =>
-    columns.map((column) => cellToText(record.fields[column.id] ?? null, column.type)),
-  );
+  // 与 Excel 一致：计划期限等特殊列统一经 formatCellText 处理（只保留到日）
+  return rows.map((record) => columns.map((column) => formatCellText(record, column)));
 }
 
 function csvEscape(value: string): string {

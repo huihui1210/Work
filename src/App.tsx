@@ -212,9 +212,14 @@ export default function App() {
         return;
       }
 
-      const blob = await buildFileBlob(format, data.columns, data.rows, data.viewName);
-      downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, format));
-      setMessage({ type: 'success', text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列）。` });
+      // CSV：不导出附件列（其余字段全部保留，即使暂无数据）；计划期限只到日
+      const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
+      const blob = await buildFileBlob('csv', columns, data.rows, data.viewName);
+      downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'csv'));
+      setMessage({
+        type: 'success',
+        text: `已导出 ${data.rows.length} 条记录（${columns.length} 列，未含附件列）。`,
+      });
       void refresh();
     } catch (error) {
       setMessage({ type: 'error', text: errorToMessage(error) });
