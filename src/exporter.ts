@@ -508,6 +508,13 @@ export function buildFilename(base: string, ext: string): string {
   return `${base.replace(/[\\/:*?"<>|]/g, '_')}_${stamp}.${ext}`;
 }
 
+/** 过滤掉在所选记录中没有任何数据的列（避免导出整列空白的表头） */
+export function filterNonEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
+  return columns.filter((col) =>
+    rows.some((record) => cellToText(record.fields[col.id] ?? null, col.type).trim() !== ''),
+  );
+}
+
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }

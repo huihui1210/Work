@@ -79,6 +79,7 @@ function makeCell(spec: CellSpec): TableCell {
 
 function makeRow(cells: TableCell[], minHeight?: number): TableRow {
   return new TableRow({
+    cantSplit: true,
     height: minHeight ? { value: minHeight, rule: HeightRule.ATLEAST } : undefined,
     children: cells,
   });
@@ -128,24 +129,24 @@ function buildOrderChildren(
     new Paragraph({
       alignment: AlignmentType.CENTER,
       pageBreakBefore: firstPageBreak,
-      spacing: { before: 0, after: 40 },
+      spacing: { before: 0, after: 20 },
       children: [
         new TextRun({
           text: '福建LNG接收站',
           bold: true,
-          size: 30,
+          size: 28,
           font: { ascii: '微软雅黑', eastAsia: '微软雅黑', hAnsi: '微软雅黑' },
         }),
       ],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 0, after: 120 },
+      spacing: { before: 0, after: 80 },
       children: [
         new TextRun({
           text: '设备缺陷处理工单',
           bold: true,
-          size: 42,
+          size: 40,
           font: { ascii: '微软雅黑', eastAsia: '微软雅黑', hAnsi: '微软雅黑' },
         }),
       ],
@@ -206,6 +207,16 @@ function buildOrderChildren(
     );
   }
 
+  // 防止相邻表格被 Word 合并：顶部信息表与主表之间加微间距
+  if (discoverDate || defectNo) {
+    children.push(
+      new Paragraph({
+        spacing: { before: 20, after: 20 },
+        children: [new TextRun({ text: '', size: 2 })],
+      }),
+    );
+  }
+
   /* ------- 主表格 ------- */
   const [c0, c1, c2, c3, c4, c5] = GRID;
   const rows: TableRow[] = [];
@@ -221,13 +232,13 @@ function buildOrderChildren(
         makeCell({ text: '所属岗位', width: c4, bold: true }),
         makeCell({ text: get('post'), width: c5 }),
       ],
-      460,
+      400,
     ),
   );
 
   // 部门与专业
-  const deptCell = labelValue('责任部门', get('dept'), c0, c1 + c2 + c3, 3, 460);
-  const specCell = labelValue('专业', get('specialty'), c4, c5, undefined, 460);
+  const deptCell = labelValue('责任部门', get('dept'), c0, c1 + c2 + c3, 3, 400);
+  const specCell = labelValue('专业', get('specialty'), c4, c5, undefined, 400);
   rows.push(makeRow([...deptCell, ...specCell]));
 
   // 缺陷描述（区域部位 / 设备名称 / 位号 合并一行）
@@ -237,14 +248,14 @@ function buildOrderChildren(
   rows.push(
     makeRow(
       [makeCell({ text: '缺陷描述', width: c0, bold: true }), makeCell({ text: descText, width: c1 + c2 + c3 + c4 + c5, span: 5, align: AlignmentType.CENTER })],
-      700,
+      560,
     ),
   );
 
   // 日期：计划期限 / 消项时间（只到日）
   if (fieldIds.deadline || fieldIds.closeTime) {
-    const a = labelValue('计划期限', dateOnly(get('deadline')), c0, c1 + c2, 2, 460);
-    const b = labelValue('消项时间', closeDate, c3, c4 + c5, 2, 460);
+    const a = labelValue('计划期限', dateOnly(get('deadline')), c0, c1 + c2, 2, 400);
+    const b = labelValue('消项时间', closeDate, c3, c4 + c5, 2, 400);
     rows.push(makeRow([a[0], a[1], b[0], b[1]]));
   }
 
@@ -274,16 +285,16 @@ function buildOrderChildren(
     };
     const second = yesNoIds[i + 1]
       ? {
-          name: columnsById.get(yesNoIds[i + 1])?.name ?? '状态',
-          value: yesNoText(row[yesNoIds[i + 1]] ?? ''),
-        }
+        name: columnsById.get(yesNoIds[i + 1])?.name ?? '状态',
+        value: yesNoText(row[yesNoIds[i + 1]] ?? ''),
+      }
       : null;
     if (second) {
-      const a = labelValue(first.name, first.value, c0, c1 + c2, 2, 460);
-      const b = labelValue(second.name, second.value, c3, c4 + c5, 2, 460);
+      const a = labelValue(first.name, first.value, c0, c1 + c2, 2, 400);
+      const b = labelValue(second.name, second.value, c3, c4 + c5, 2, 400);
       rows.push(makeRow([a[0], a[1], b[0], b[1]]));
     } else {
-      rows.push(makeRow(labelValue(first.name, first.value, c0, c1 + c2 + c3 + c4 + c5, 5, 460)));
+      rows.push(makeRow(labelValue(first.name, first.value, c0, c1 + c2 + c3 + c4 + c5, 5, 400)));
     }
   }
 
@@ -303,8 +314,8 @@ function buildOrderChildren(
 
   // 风险控制措施 + 备注
   if (fieldIds.risk || fieldIds.remark) {
-    const a = labelValue('风险控制措施', get('risk'), c0, c1 + c2, 2, 460);
-    const b = labelValue('备注', get('remark'), c3, c4 + c5, 2, 460);
+    const a = labelValue('风险控制措施', get('risk'), c0, c1 + c2, 2, 400);
+    const b = labelValue('备注', get('remark'), c3, c4 + c5, 2, 400);
     rows.push(makeRow([a[0], a[1], b[0], b[1]]));
   }
 
@@ -390,7 +401,7 @@ function buildOrderChildren(
           ],
         });
       }),
-      900,
+      760,
     ),
   );
 
@@ -410,9 +421,15 @@ function buildOrderChildren(
     }),
   );
 
-  // 工单之间的间隔（同页两张时留出空隙；下一张从半页顶部开始）
+  // 同页两张工单之间：虚线分隔（与 PDF 版式一致）
   if (orderIndex % 2 === 0) {
-    children.push(new Paragraph({ spacing: { before: 0, after: 0 }, children: [] }));
+    children.push(
+      new Paragraph({
+        spacing: { before: 80, after: 80 },
+        border: { bottom: { style: BorderStyle.DASHED, size: 6, color: '888888', space: 1 } },
+        children: [new TextRun({ text: '', size: 2 })],
+      }),
+    );
   }
 
   return children;
