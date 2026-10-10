@@ -182,7 +182,7 @@ function buildOrderBlocks(model: OrderModel): (Paragraph | Table)[] {
   const valueAll = c1 + c2 + c3 + c4 + c5;
   const rows: TableRow[] = [];
 
-  // 基本信息：缺陷等级 / 发现人 / 所属岗位
+  // 基本信息：缺陷等级 / 发现人 / 岗位（或站场）
   rows.push(
     makeRow(
       [
@@ -190,7 +190,7 @@ function buildOrderBlocks(model: OrderModel): (Paragraph | Table)[] {
         makeCell({ text: get('level'), width: c1 }),
         makeCell({ text: '发现人', width: c2, bold: true }),
         makeCell({ text: get('finder'), width: c3 }),
-        makeCell({ text: '所属岗位', width: c4, bold: true }),
+        makeCell({ text: model.fieldLabel('post'), width: c4, bold: true }),
         makeCell({ text: get('post'), width: c5 }),
       ],
       ROW_H,
@@ -309,10 +309,10 @@ function buildOrderBlocks(model: OrderModel): (Paragraph | Table)[] {
     );
   }
 
-  // 签字区：消缺人签字 / 班长签字（姓名楷体手写风格）+ 日期（取消项日期）
+  // 签字区：消缺人签字 / 班长（或站长）签字（姓名楷体手写风格）+ 日期（取消项日期）
   const signSpecs = [
     { role: '消缺人', name: get('repairer') },
-    { role: '班长', name: get('leader') },
+    { role: model.fieldLabel('leader'), name: get('leader') },
   ];
   rows.push(
     makeRow(

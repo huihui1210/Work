@@ -22,7 +22,7 @@ interface FieldDef {
 const FIELD_DEFS: FieldDef[] = [
   { key: 'defectNo', match: ['缺陷编号', '缺陷单号', '工单编号', '工单号', '编号', 'id'] },
   { key: 'finder', match: ['发现人', '上报人', '报告人'] },
-  { key: 'post', match: ['所属岗位', '岗位', '班值'] },
+  { key: 'post', match: ['所属岗位', '岗位', '站场', '班值'] },
   { key: 'level', match: ['分类定级', '缺陷等级', '定级', '分类', '等级'] },
   { key: 'desc', match: ['缺陷描述', '缺陷内容', '设备缺陷', '描述'] },
   { key: 'deadline', match: ['计划期限', '计划完成', '期限'] },
@@ -34,7 +34,7 @@ const FIELD_DEFS: FieldDef[] = [
   { key: 'specialty', match: ['专业'], exact: true },
   { key: 'risk', match: ['风险控制措施', '风险措施', '安全措施'] },
   { key: 'repairer', match: ['消缺人'] },
-  { key: 'leader', match: ['班长', '班组长'] },
+  { key: 'leader', match: ['班长', '班组长', '站长'] },
   { key: 'closeTime', match: ['消项时间', '消缺完成日期', '完成日期', '消缺时间', '完成时间', '关闭时间'] },
   { key: 'remark', match: ['备注', '说明'] },
 ];
@@ -161,12 +161,20 @@ export interface LeftoverItem {
   value: string;
 }
 
+/** 默认标签（字段未匹配到时用于兜底显示） */
+const DEFAULT_LABELS: Record<string, string> = {
+  post: '所属岗位',
+  leader: '班长',
+};
+
 /** 与渲染无关的单张工单视图模型 */
 export interface OrderModel {
   /** 按字段语义 key 取值（key 未匹配时返回空串） */
   get: (key: string) => string;
   /** 该语义字段在表中是否存在（区别于「有值」，用于需要留空待填的行） */
   has: (key: string) => boolean;
+  /** 获取语义字段对应的原始列名（用于动态显示标签，如「站场」/「岗位」、「站长」/「班长」） */
+  fieldLabel: (key: string) => string;
   defectNo: string;
   discoverDate: string;
   /** 计划期限（只到日） */
@@ -192,6 +200,11 @@ export function buildOrderModel(
 ): OrderModel {
   const get = (key: string): string => (fieldIds[key] ? row[fieldIds[key]!] ?? '' : '');
   const has = (key: string): boolean => !!fieldIds[key];
+  const fieldLabel = (key: string): string => {
+    const colId = fieldIds[key];
+    if (!colId) return DEFAULT_LABELS[key] ?? key;
+    return columnsById.get(colId)?.name ?? DEFAULT_LABELS[key] ?? key;
+  };
 
   const defectNo = get('defectNo');
   const discoverDate = parseDiscoverDate(defectNo);
@@ -228,6 +241,7 @@ export function buildOrderModel(
   return {
     get,
     has,
+    fieldLabel,
     defectNo,
     discoverDate,
     deadlineDate,

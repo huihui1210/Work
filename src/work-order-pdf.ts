@@ -72,13 +72,13 @@ function renderOrder(model: OrderModel): HTMLElement {
   // 表格主体
   const table = h('div', 'wo-table');
 
-  // 基本信息：缺陷等级 / 发现人 / 所属岗位
+  // 基本信息：缺陷等级 / 发现人 / 岗位（或站场）
   appendIf(
     table,
     pairRow([
       { label: '缺陷等级', value: get('level') },
       { label: '发现人', value: get('finder') },
-      { label: '所属岗位', value: get('post') },
+      { label: model.fieldLabel('post'), value: get('post') },
     ]),
   );
 
@@ -150,11 +150,11 @@ function renderOrder(model: OrderModel): HTMLElement {
     appendIf(table, fieldRow(item.name, item.value, 'wo-left'));
   }
 
-  // 签字区（表单固定结构，始终显示）：消缺人 / 班长；姓名手写体，日期显示消项日期
+  // 签字区（表单固定结构，始终显示）：消缺人 / 班长（或站长）；姓名手写体，日期显示消项日期
   const signRow = h('div', 'wo-row wo-sign');
   const signCells = [
     { role: '消缺人', name: get('repairer') },
-    { role: '班长', name: get('leader') },
+    { role: model.fieldLabel('leader'), name: get('leader') },
   ];
   signCells.forEach((item, idx) => {
     const cell = h('div', 'wo-sign-cell');
