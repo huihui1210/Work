@@ -36,7 +36,7 @@ const DATA_ROW_HEIGHT = 22;
 /** 双行合并组表头（与 DMS_DA 美化台账一致）：组名列横跨子列，子列名在第二行 */
 const MERGE_GROUPS = [
   { groupName: '制约因素', fields: ['方案', '备件', '条件', '人员', '窗口'] },
-  { groupName: '消项确认记录', fields: ['消缺人', '班长', '站长', '消项时间'] },
+  { groupName: '消项确认记录', fields: ['消缺人', '班长', '站长', '消项时间', '成因分析', '备注'] },
 ];
 /** 合并组子列统一列宽 */
 const GROUP_COL_WIDTH = 12;
