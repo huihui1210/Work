@@ -94,16 +94,24 @@ function csvEscape(value: string): string {
 /**
  * 过滤掉所有无数据的非附件列：
  * 视图字段列表与实际数据不一致时，会出现大量只有标题的空列。
- * 仅裁末尾不够——中间若有含默认值（如"否"/"0"）的列会阻断后续裁剪。
+ * 检查原始值：null/undefined/空字符串/空数组 视为无数据。
+ * 也检查文本表示：cellToText 返回空串视为无数据。
  * 附件列即使无文本也不裁剪（可能内嵌图片）。
  */
 function filterEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
   if (rows.length === 0) return columns;
-  const filtered = columns.filter(
-    (col) =>
-      col.type === FieldType.Attachment ||
-      rows.some((record) => cellToText(record.fields[col.id] ?? null, col.type).trim() !== ''),
-  );
+  const filtered = columns.filter((col) => {
+    if (col.type === FieldType.Attachment) return true;
+    return rows.some((record) => {
+      const raw = record.fields[col.id];
+      // 原始值不存在、null、空串、空数组 → 无数据
+      if (raw === null || raw === undefined) return false;
+      if (raw === '') return false;
+      if (Array.isArray(raw) && raw.length === 0) return false;
+      // 文本表示为空 → 无数据
+      return cellToText(raw, col.type).trim() !== '';
+    });
+  });
   // 全部被过滤时保留原列结构，避免导出空表
   return filtered.length > 0 ? filtered : columns;
 }
@@ -240,6 +248,12 @@ async function buildStyledWorkbook(
     from: { row: headerRows, column: 1 },
     to: { row: rows.length + headerRows, column: columns.length },
   };
+
+  // 防止 ExcelJS 残留多余列定义导致 Excel 打开后出现大量空列
+  const extraCols = worksheet.columnCount - columns.length;
+  if (extraCols > 0) {
+    worksheet.spliceColumns(columns.length + 1, extraCols);
+  }
 
   return { workbook, headerRows };
 }
