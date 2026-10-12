@@ -13,6 +13,22 @@ export class ExportError extends Error {
   }
 }
 
+/** 动态导入失败重试：插件刚更新或网络抖动时按需加载的模块可能偶发拉取失败 */
+export async function importWithRetry<T>(loader: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await loader();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export interface ExportColumn {
   id: string;
   name: string;
@@ -24,6 +40,8 @@ export interface ExportData {
   rows: IRecord[];
   tableName: string;
   viewName: string;
+  /** 读取失败被跳过的记录数（宿主对个别异常单元格序列化报错时逐条兜底） */
+  failedRecordCount: number;
 }
 
 export interface SelectionInfo {
@@ -97,15 +115,30 @@ export async function getSelectedData(): Promise<ExportData> {
     .map((field) => ({ id: field.id, name: field.name, type: field.type }));
 
   const rows: IRecord[] = [];
+  let failedRecordCount = 0;
   for (let i = 0; i < recordIds.length; i += CHUNK_SIZE) {
     const chunkIds = recordIds.slice(i, i + CHUNK_SIZE);
-    const values = await table.getRecordsByIds(chunkIds);
+    let values: Awaited<ReturnType<typeof table.getRecordsByIds>>;
+    try {
+      values = await table.getRecordsByIds(chunkIds);
+    } catch {
+      // 宿主对个别异常单元格序列化时会整批报错：逐条兜底，跳过读取失败的记录
+      for (const recordId of chunkIds) {
+        try {
+          const single = await table.getRecordsByIds([recordId]);
+          rows.push({ recordId, fields: single[0]?.fields ?? {} });
+        } catch {
+          failedRecordCount += 1;
+        }
+      }
+      continue;
+    }
     values.forEach((value, index) => {
       rows.push({ recordId: chunkIds[index], fields: value.fields });
     });
   }
 
-  return { columns, rows, tableName, viewName };
+  return { columns, rows, tableName, viewName, failedRecordCount };
 }
 
 interface RawAttachment {

@@ -100,8 +100,18 @@ export default function App() {
     }
     try {
       const data = await getSelectedData();
+      const skipNote =
+        data.failedRecordCount > 0
+          ? `（另有 ${data.failedRecordCount} 条记录读取失败已跳过，可能包含异常单元格）`
+          : '';
       if (data.rows.length === 0) {
-        setMessage({ type: 'info', text: '请先在表格视图中勾选要导出的记录。' });
+        setMessage({
+          type: data.failedRecordCount > 0 ? 'error' : 'info',
+          text:
+            data.failedRecordCount > 0
+              ? `选中的 ${data.failedRecordCount} 条记录读取失败，可能包含异常单元格（如错误公式），已无法导出。`
+              : '请先在表格视图中勾选要导出的记录。',
+        });
         return;
       }
 
@@ -136,7 +146,7 @@ export default function App() {
           dmsWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
           setMessage({
             type: 'success',
-            text: `已发送 ${data.rows.length} 条记录到缺陷管理系统，请查看新标签页。`,
+            text: `已发送 ${data.rows.length} 条记录到缺陷管理系统，请查看新标签页。${skipNote}`,
           });
           void refresh();
         } catch {
@@ -160,7 +170,7 @@ export default function App() {
           downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'docx'));
           setMessage({
             type: 'success',
-            text: `已生成 ${data.rows.length} 张可编辑工单 Word（按缺陷编号排序）。`,
+            text: `已生成 ${data.rows.length} 张可编辑工单 Word（按缺陷编号排序）。${skipNote}`,
           });
         } else {
           setMessage({ type: 'info', text: '正在生成工单 PDF…' });
@@ -170,7 +180,7 @@ export default function App() {
           downloadBlob(blob, buildFilename(`缺陷处理工单_${data.tableName}`, 'pdf'));
           setMessage({
             type: 'success',
-            text: `已生成 ${data.rows.length} 张缺陷处理工单 PDF（按缺陷编号排序）。`,
+            text: `已生成 ${data.rows.length} 张缺陷处理工单 PDF（按缺陷编号排序）。${skipNote}`,
           });
         }
         void refresh();
@@ -196,7 +206,7 @@ export default function App() {
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'success',
-            text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。`,
+            text: `已导出 ${data.rows.length} 条记录（${data.columns.length} 列），缺陷图片已内嵌。${skipNote}`,
           });
         } else {
           // 未勾选图片：不导出附件列（其余字段全部保留，即使选中记录中该列暂无数据）
@@ -205,7 +215,7 @@ export default function App() {
           downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'xlsx'));
           setMessage({
             type: 'success',
-            text: `已导出 ${data.rows.length} 条记录（${columns.length} 列，未含附件列）。`,
+            text: `已导出 ${data.rows.length} 条记录（${columns.length} 列，未含附件列）。${skipNote}`,
           });
         }
         void refresh();
@@ -218,7 +228,7 @@ export default function App() {
       downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'csv'));
       setMessage({
         type: 'success',
-        text: `已导出 ${data.rows.length} 条记录（${columns.length} 列，未含附件列）。`,
+        text: `已导出 ${data.rows.length} 条记录（${columns.length} 列，未含附件列）。${skipNote}`,
       });
       void refresh();
     } catch (error) {
@@ -349,6 +359,10 @@ function errorToMessage(error: unknown): string {
   }
   console.error('[一键导出] 导出失败，原始错误：', error);
   const detail = error instanceof Error ? error.message : String(error ?? '');
+  // 插件刚更新或网络抖动时按需模块会偶发拉取失败，给出可操作的提示
+  if (/Failed to fetch dynamically imported module/i.test(detail)) {
+    return '导出失败：模块加载失败（网络波动或插件刚更新），请重新打开插件后重试。';
+  }
   return detail
     ? `导出失败：${detail}`
     : '导出失败，请确认插件运行在多维表格边栏中，且你对这些记录有查看权限。';

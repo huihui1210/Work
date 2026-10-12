@@ -1,6 +1,6 @@
 import { FieldType } from '@lark-base-open/js-sdk';
 import type { IRecord } from '@lark-base-open/js-sdk';
-import { cellToText } from './bitable-helper';
+import { cellToText, importWithRetry } from './bitable-helper';
 import type { AttachmentInfo, AttachmentMap, ExportColumn } from './bitable-helper';
 import type * as ExcelJSTypes from 'exceljs';
 
@@ -129,7 +129,7 @@ async function buildStyledWorkbook(
   getText: (record: IRecord, col: ExportColumn) => string,
   attachmentColWidth?: number,
 ): Promise<{ workbook: ExcelJSTypes.Workbook; headerRows: number }> {
-  const ExcelJS = (await import('exceljs')).default;
+  const ExcelJS = (await importWithRetry(() => import('exceljs'))).default;
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sanitizeSheetName(sheetName));
 

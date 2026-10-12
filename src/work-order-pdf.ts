@@ -1,5 +1,6 @@
 import type { IRecord } from '@lark-base-open/js-sdk';
 import type { ExportColumn } from './bitable-helper';
+import { importWithRetry } from './bitable-helper';
 import {
   buildOrderModel,
   resolveFields,
@@ -256,8 +257,8 @@ export async function buildWorkOrderPdfBlob(
 
   try {
     const [{ jsPDF }, html2canvas] = await Promise.all([
-      import('jspdf'),
-      import('html2canvas-pro'),
+      importWithRetry(() => import('jspdf')),
+      importWithRetry(() => import('html2canvas-pro')),
     ]);
 
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
