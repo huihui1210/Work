@@ -138,7 +138,17 @@ export async function getSelectedData(): Promise<ExportData> {
     });
   }
 
-  return { columns, rows, tableName, viewName, failedRecordCount };
+  // 从记录中收集所有实际存在的字段ID，交叉验证columns
+  // SDK 的 getVisibleFieldIdList 可能返回隐藏/不存在的字段ID
+  const realFieldIds = new Set<string>();
+  rows.forEach((record) => {
+    Object.keys(record.fields).forEach((key) => realFieldIds.add(key));
+  });
+  const finalColumns = realFieldIds.size > 0
+    ? columns.filter((col) => realFieldIds.has(col.id))
+    : columns;
+
+  return { columns: finalColumns, rows, tableName, viewName, failedRecordCount };
 }
 
 interface RawAttachment {
