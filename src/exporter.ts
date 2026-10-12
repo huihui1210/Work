@@ -91,10 +91,26 @@ function csvEscape(value: string): string {
   return value;
 }
 
+/**
+ * 去掉末尾整列无数据的非附件列：
+ * 视图字段列表与实际数据不一致时，导出末尾会出现大量只有标题的空列，
+ * 每列还带边框/筛选/合并样式，导致打开卡顿。附件列即使无文本也不裁剪（可能内嵌图片）。
+ */
+function trimTrailingEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
+  const hasData = (col: ExportColumn): boolean =>
+    col.type === FieldType.Attachment ||
+    rows.some((record) => cellToText(record.fields[col.id] ?? null, col.type).trim() !== '');
+  let end = columns.length;
+  while (end > 0 && !hasData(columns[end - 1])) end -= 1;
+  // 整表全空时保留原列结构，避免导出空表
+  return end === 0 ? columns : columns.slice(0, end);
+}
+
 function toCSV(columns: ExportColumn[], rows: IRecord[]): Blob {
+  const cols = trimTrailingEmptyColumns(columns, rows);
   const lines = [
-    columns.map((column) => csvEscape(column.name)).join(','),
-    ...buildMatrix(columns, rows).map((line) => line.map(csvEscape).join(',')),
+    cols.map((column) => csvEscape(column.name)).join(','),
+    ...buildMatrix(cols, rows).map((line) => line.map(csvEscape).join(',')),
   ];
   // BOM 让 Excel 正确识别中文编码
   return new Blob(['\uFEFF', lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -227,7 +243,12 @@ async function buildStyledWorkbook(
 }
 
 async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Promise<Blob> {
-  const { workbook } = await buildStyledWorkbook(columns, rows, sheetName, formatCellText);
+  const { workbook } = await buildStyledWorkbook(
+    trimTrailingEmptyColumns(columns, rows),
+    rows,
+    sheetName,
+    formatCellText,
+  );
   const output = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
   return new Blob([output], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -330,8 +351,9 @@ export async function exportXlsxWithImages(
   sheetName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
+  const cols = trimTrailingEmptyColumns(columns, rows);
   const { workbook, headerRows } = await buildStyledWorkbook(
-    columns,
+    cols,
     rows,
     sheetName,
     (record, col) =>
@@ -345,7 +367,7 @@ export async function exportXlsxWithImages(
   const jobs: CellImageJob[] = [];
   let totalImages = 0;
 
-  columns.forEach((col, colIndex) => {
+  cols.forEach((col, colIndex) => {
     if (col.type !== FieldType.Attachment) return;
     const perRecord = attachmentMap[col.id] ?? {};
     rows.forEach((record, rIdx) => {
