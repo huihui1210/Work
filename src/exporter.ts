@@ -92,22 +92,24 @@ function csvEscape(value: string): string {
 }
 
 /**
- * 去掉末尾整列无数据的非附件列：
- * 视图字段列表与实际数据不一致时，导出末尾会出现大量只有标题的空列，
- * 每列还带边框/筛选/合并样式，导致打开卡顿。附件列即使无文本也不裁剪（可能内嵌图片）。
+ * 过滤掉所有无数据的非附件列：
+ * 视图字段列表与实际数据不一致时，会出现大量只有标题的空列。
+ * 仅裁末尾不够——中间若有含默认值（如"否"/"0"）的列会阻断后续裁剪。
+ * 附件列即使无文本也不裁剪（可能内嵌图片）。
  */
-function trimTrailingEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
-  const hasData = (col: ExportColumn): boolean =>
-    col.type === FieldType.Attachment ||
-    rows.some((record) => cellToText(record.fields[col.id] ?? null, col.type).trim() !== '');
-  let end = columns.length;
-  while (end > 0 && !hasData(columns[end - 1])) end -= 1;
-  // 整表全空时保留原列结构，避免导出空表
-  return end === 0 ? columns : columns.slice(0, end);
+function filterEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
+  if (rows.length === 0) return columns;
+  const filtered = columns.filter(
+    (col) =>
+      col.type === FieldType.Attachment ||
+      rows.some((record) => cellToText(record.fields[col.id] ?? null, col.type).trim() !== ''),
+  );
+  // 全部被过滤时保留原列结构，避免导出空表
+  return filtered.length > 0 ? filtered : columns;
 }
 
 function toCSV(columns: ExportColumn[], rows: IRecord[]): Blob {
-  const cols = trimTrailingEmptyColumns(columns, rows);
+  const cols = filterEmptyColumns(columns, rows);
   const lines = [
     cols.map((column) => csvEscape(column.name)).join(','),
     ...buildMatrix(cols, rows).map((line) => line.map(csvEscape).join(',')),
@@ -244,7 +246,7 @@ async function buildStyledWorkbook(
 
 async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Promise<Blob> {
   const { workbook } = await buildStyledWorkbook(
-    trimTrailingEmptyColumns(columns, rows),
+    filterEmptyColumns(columns, rows),
     rows,
     sheetName,
     formatCellText,
@@ -351,7 +353,7 @@ export async function exportXlsxWithImages(
   sheetName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
-  const cols = trimTrailingEmptyColumns(columns, rows);
+  const cols = filterEmptyColumns(columns, rows);
   const { workbook, headerRows } = await buildStyledWorkbook(
     cols,
     rows,
