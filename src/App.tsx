@@ -331,7 +331,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.0.6</span>
+        <span>v2.0.7</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>

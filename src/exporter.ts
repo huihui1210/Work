@@ -135,10 +135,15 @@ function displayWidth(text: string): number {
   return text.replace(/[^\x00-\xff]/g, 'XX').length;
 }
 
-/** 统一设置行边框 */
-function setRowBorder(row: ExcelJSTypes.Row, color: string): void {
+/** 构造四边细边框 */
+function rowBorder(color: string) {
   const side = { style: 'thin' as const, color: { argb: color } };
-  row.border = { top: side, bottom: side, left: side, right: side };
+  return { top: side, bottom: side, left: side, right: side };
+}
+
+/** 逐单元格应用样式（仅前 colCount 列）——绝不使用行级样式，行级样式会让整行 16384 列带上填充/边框 */
+function styleCells(row: ExcelJSTypes.Row, colCount: number, paint: (cell: ExcelJSTypes.Cell) => void): void {
+  for (let c = 1; c <= colCount; c += 1) paint(row.getCell(c));
 }
 
 /**
@@ -182,19 +187,24 @@ async function buildStyledWorkbook(
     }),
   );
   header1.height = HEADER_ROW_HEIGHT;
-  header1.font = headerStyle.font;
-  header1.fill = headerStyle.fill;
-  header1.alignment = headerStyle.alignment;
-  setRowBorder(header1, HEADER_BORDER);
+  // 逐单元格设置样式——行级样式会让整行 16384 列都渲染填充/边框（无限灰色表头的根因）
+  styleCells(header1, columns.length, (cell) => {
+    cell.font = headerStyle.font;
+    cell.fill = headerStyle.fill;
+    cell.alignment = headerStyle.alignment;
+    cell.border = rowBorder(HEADER_BORDER);
+  });
 
   // 第二行表头：组内列显示子字段名，其余留空（稍后与第一行纵向合并）
   if (hasGroups) {
     const header2 = worksheet.addRow(columns.map((col, idx) => (groupColMap.has(idx) ? col.name : '')));
     header2.height = HEADER_ROW_HEIGHT;
-    header2.font = headerStyle.font;
-    header2.fill = headerStyle.fill;
-    header2.alignment = headerStyle.alignment;
-    setRowBorder(header2, HEADER_BORDER);
+    styleCells(header2, columns.length, (cell) => {
+      cell.font = headerStyle.font;
+      cell.fill = headerStyle.fill;
+      cell.alignment = headerStyle.alignment;
+      cell.border = rowBorder(HEADER_BORDER);
+    });
   }
 
   // 列宽：按内容自适应（中文按 2 字符），上限 40；附件列/合并组子列可固定宽度
@@ -227,18 +237,20 @@ async function buildStyledWorkbook(
     }
   }
 
-  // 数据行：斑马纹 + 居中 + 细边框
+  // 数据行：斑马纹 + 居中 + 细边框（逐单元格，不用行级样式）
   rows.forEach((record, idx) => {
     const row = worksheet.addRow(columns.map((col) => getText(record, col)));
     row.height = DATA_ROW_HEIGHT;
-    row.font = { name: FONT_NAME, size: 11, color: { argb: TEXT_COLOR } };
-    row.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: idx % 2 === 0 ? ZEBRA_FILL : WHITE_FILL },
-    };
-    row.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
-    setRowBorder(row, DATA_BORDER);
+    styleCells(row, columns.length, (cell) => {
+      cell.font = { name: FONT_NAME, size: 11, color: { argb: TEXT_COLOR } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: idx % 2 === 0 ? ZEBRA_FILL : WHITE_FILL },
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
+      cell.border = rowBorder(DATA_BORDER);
+    });
   });
 
   // 冻结表头 + 自动筛选
