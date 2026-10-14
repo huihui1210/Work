@@ -92,32 +92,30 @@ function csvEscape(value: string): string {
 }
 
 /**
- * 过滤掉所有无数据的非附件列：
- * 视图字段列表与实际数据不一致时，会出现大量只有标题的空列。
- * 检查原始值：null/undefined/空字符串/空数组 视为无数据。
- * 也检查文本表示：cellToText 返回空串视为无数据。
- * 附件列即使无文本也不裁剪（可能内嵌图片）。
+ * 按表头标准裁剪数据矩阵（写入 Excel 前执行）：
+ * 有表头名称的列无条件保留，无论该列有无数据；
+ * 仅剔除「无表头且无内容」的空白列，使 used_range 只覆盖有效字段。
  */
-function filterEmptyColumns(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
-  if (rows.length === 0) return columns;
+function trimMatrixByHeaders(columns: ExportColumn[], rows: IRecord[]): ExportColumn[] {
+  const cleanHeader = (name: string) =>
+    name.replace(/[\s\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/g, '');
+  const hasContent = (raw: unknown) =>
+    raw !== null &&
+    raw !== undefined &&
+    raw !== '' &&
+    !(Array.isArray(raw) && raw.length === 0) &&
+    cellToText(raw, FieldType.Text).trim() !== '';
   const filtered = columns.filter((col) => {
-    if (col.type === FieldType.Attachment) return true;
-    return rows.some((record) => {
-      const raw = record.fields[col.id];
-      // 原始值不存在、null、空串、空数组 → 无数据
-      if (raw === null || raw === undefined) return false;
-      if (raw === '') return false;
-      if (Array.isArray(raw) && raw.length === 0) return false;
-      // 文本表示为空 → 无数据
-      return cellToText(raw, col.type).trim() !== '';
-    });
+    if (cleanHeader(col.name).length > 0) return true;
+    if (rows.length === 0) return false;
+    return rows.some((record) => hasContent(record.fields[col.id]));
   });
   // 全部被过滤时保留原列结构，避免导出空表
   return filtered.length > 0 ? filtered : columns;
 }
 
 function toCSV(columns: ExportColumn[], rows: IRecord[]): Blob {
-  const cols = filterEmptyColumns(columns, rows);
+  const cols = trimMatrixByHeaders(columns, rows);
   const lines = [
     cols.map((column) => csvEscape(column.name)).join(','),
     ...buildMatrix(cols, rows).map((line) => line.map(csvEscape).join(',')),
@@ -249,10 +247,16 @@ async function buildStyledWorkbook(
     to: { row: rows.length + headerRows, column: columns.length },
   };
 
-  // 防止 ExcelJS 残留多余列定义导致 Excel 打开后出现大量空列
-  const extraCols = worksheet.columnCount - columns.length;
+  // 文件层兜底：used_range 必须收缩到有效表头列，杜绝打开后出现大量无表头空白列
+  const expected = columns.length;
+  const extraCols = worksheet.columnCount - expected;
   if (extraCols > 0) {
-    worksheet.spliceColumns(columns.length + 1, extraCols);
+    // 逐行裁掉超出的单元格
+    worksheet.spliceColumns(expected + 1, extraCols);
+  }
+  if (worksheet.columns && worksheet.columns.length > expected) {
+    // 列定义数组同样截断，<cols> 不会写出多余范围
+    worksheet.columns = worksheet.columns.slice(0, expected);
   }
 
   return { workbook, headerRows };
@@ -260,7 +264,7 @@ async function buildStyledWorkbook(
 
 async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Promise<Blob> {
   const { workbook } = await buildStyledWorkbook(
-    filterEmptyColumns(columns, rows),
+    trimMatrixByHeaders(columns, rows),
     rows,
     sheetName,
     formatCellText,
@@ -367,7 +371,7 @@ export async function exportXlsxWithImages(
   sheetName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob> {
-  const cols = filterEmptyColumns(columns, rows);
+  const cols = trimMatrixByHeaders(columns, rows);
   const { workbook, headerRows } = await buildStyledWorkbook(
     cols,
     rows,

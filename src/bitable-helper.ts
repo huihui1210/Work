@@ -108,10 +108,9 @@ export async function getSelectedData(): Promise<ExportData> {
   ]);
 
   const visibleSet = new Set(visibleFieldIds);
+  // 以视图表头字段为标准：可见字段全部先保留（含未命名的），取完记录后再按规则裁剪
   const columns: ExportColumn[] = fieldMetas
     .filter((field) => visibleSet.has(field.id))
-    // 丢弃未命名的占位字段：字段名去除所有空白和不可见字符后为空则视为未命名
-    .filter((field) => field.name.replace(/[\s\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/g, '').length > 0)
     .map((field) => ({ id: field.id, name: field.name, type: field.type }));
 
   const rows: IRecord[] = [];
@@ -138,15 +137,19 @@ export async function getSelectedData(): Promise<ExportData> {
     });
   }
 
-  // 从记录中收集所有实际存在的字段ID，交叉验证columns
-  // SDK 的 getVisibleFieldIdList 可能返回隐藏/不存在的字段ID
-  const realFieldIds = new Set<string>();
-  rows.forEach((record) => {
-    Object.keys(record.fields).forEach((key) => realFieldIds.add(key));
+  // 按表头标准裁剪数据矩阵：
+  // 有表头名称的列无条件保留（无论有无数据）；仅剔除「无表头且无内容」的空白列
+  const cleanHeader = (name: string) =>
+    name.replace(/[\s\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]/g, '');
+  const hasContent = (raw: unknown) =>
+    raw !== null &&
+    raw !== undefined &&
+    raw !== '' &&
+    !(Array.isArray(raw) && raw.length === 0);
+  const finalColumns = columns.filter((col) => {
+    if (cleanHeader(col.name).length > 0) return true;
+    return rows.some((record) => hasContent(record.fields[col.id]));
   });
-  const finalColumns = realFieldIds.size > 0
-    ? columns.filter((col) => realFieldIds.has(col.id))
-    : columns;
 
   return { columns: finalColumns, rows, tableName, viewName, failedRecordCount };
 }
