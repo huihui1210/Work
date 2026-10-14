@@ -3,6 +3,7 @@ import type { IRecord } from '@lark-base-open/js-sdk';
 import { cellToText, importWithRetry } from './bitable-helper';
 import type { AttachmentInfo, AttachmentMap, ExportColumn } from './bitable-helper';
 import type * as ExcelJSTypes from 'exceljs';
+import { clampXlsxColumns, idxToCol } from './xlsx-clamp';
 
 export type ExportFormat = 'xlsx' | 'csv';
 
@@ -258,18 +259,27 @@ async function buildStyledWorkbook(
     // 列定义数组同样截断，<cols> 不会写出多余范围
     worksheet.columns = worksheet.columns.slice(0, expected);
   }
+  // 硬锁定 dimension：写出的 <dimension ref> 精确等于有效范围，不受任何模型计算影响
+  const lastRow = rows.length + headerRows;
+  Object.defineProperty(worksheet, 'dimensions', {
+    get: () => `A1:${idxToCol(expected)}${lastRow}`,
+    configurable: true,
+  });
 
   return { workbook, headerRows };
 }
 
 async function toXLSX(columns: ExportColumn[], rows: IRecord[], sheetName: string): Promise<Blob> {
+  const cols = trimMatrixByHeaders(columns, rows);
   const { workbook } = await buildStyledWorkbook(
-    trimMatrixByHeaders(columns, rows),
+    cols,
     rows,
     sheetName,
     formatCellText,
   );
-  const output = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
+  const raw = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
+  // 字节层硬截断：文件内 used_range 锁定到有效列数
+  const output = await clampXlsxColumns(raw, cols.length);
   return new Blob([output], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
@@ -490,7 +500,9 @@ export async function exportXlsxWithImages(
     worksheet.getRow(excelRow).getCell(colIndex + 1).value = text;
   }
 
-  const output = (await workbook.xlsx.writeBuffer()) as BlobPart;
+  const raw = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
+  // 字节层硬截断：文件内 used_range 锁定到有效列数
+  const output = await clampXlsxColumns(raw, cols.length);
   return new Blob([output], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
