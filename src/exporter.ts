@@ -320,6 +320,17 @@ export async function buildFileBlob(
 
 type SupportedImageExt = 'jpeg' | 'png' | 'gif';
 
+/** 按文件名判断是否可嵌入 Excel 的图片附件（其余如 mp4 走单元格超链接） */
+function isEmbeddableImage(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.endsWith('.jpg') ||
+    lower.endsWith('.jpeg') ||
+    lower.endsWith('.png') ||
+    lower.endsWith('.gif')
+  );
+}
+
 function resolveImageExtension(name: string, mime: string): SupportedImageExt | null {
   const lower = name.toLowerCase();
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || mime === 'image/jpeg') return 'jpeg';
@@ -417,7 +428,7 @@ export async function exportXlsxWithImages(
       const infos = perRecord[record.recordId];
       if (infos?.length) {
         jobs.push({ excelRow, colIndex, infos });
-        totalImages += infos.length;
+        totalImages += infos.filter((info) => isEmbeddableImage(info.name)).length;
       } else {
         const text = formatCellText(record, col);
         if (text) fallbackTexts.set(`${excelRow}:${colIndex}`, text);
@@ -433,8 +444,14 @@ export async function exportXlsxWithImages(
   const handleJob = async (job: CellImageJob): Promise<void> => {
     let y = IMG_GAP;
     const failedNames: string[] = [];
+    // 非图片附件（视频等）：文件名写入单元格并挂下载超链接（链接指向第一个）
+    const linkFiles: AttachmentInfo[] = [];
 
     for (const info of job.infos) {
+      if (!isEmbeddableImage(info.name)) {
+        linkFiles.push(info);
+        continue;
+      }
       try {
         const image = await downloadImage(info);
         if (image) {
@@ -467,6 +484,17 @@ export async function exportXlsxWithImages(
 
     if (failedNames.length) {
       fallbackTexts.set(`${job.excelRow}:${job.colIndex}`, failedNames.join(', '));
+    }
+    if (linkFiles.length) {
+      const cell = worksheet.getRow(job.excelRow).getCell(job.colIndex + 1);
+      cell.value = {
+        text: linkFiles.map((file) => file.name).join('\n'),
+        hyperlink: linkFiles[0].url,
+      };
+      // 覆盖为超链接样式（保留底纹/边框），提示可点击
+      cell.font = { name: FONT_NAME, size: 11, color: { argb: 'FF0563C1' }, underline: true };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      y = Math.max(y, linkFiles.length * 16 + IMG_GAP);
     }
     const prevHeight = rowPixelHeights.get(job.excelRow) ?? 0;
     if (y > prevHeight) rowPixelHeights.set(job.excelRow, y);
