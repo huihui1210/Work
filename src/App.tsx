@@ -36,6 +36,16 @@ const FORMAT_OPTIONS: FormatOption[] = [
 
 type MessageType = 'success' | 'error' | 'info';
 
+/** 自动同步间隔选项（分钟） */
+const AUTO_INTERVAL_OPTIONS = [3, 5, 10, 30];
+/** localStorage 持久化键：自动同步设置 */
+const AUTO_SYNC_STORAGE_KEY = 'dms-auto-sync-config';
+
+interface AutoSyncConfig {
+  enabled: boolean;
+  intervalMinutes: number;
+}
+
 export default function App() {
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [checking, setChecking] = useState(true);
@@ -48,6 +58,145 @@ export default function App() {
 
   const refreshingRef = useRef(false);
   const pendingRefreshRef = useRef(false);
+
+  // ======= 自动同步状态 =======
+  const loadAutoConfig = (): AutoSyncConfig => {
+    try {
+      const raw = localStorage.getItem(AUTO_SYNC_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return {
+          enabled: !!parsed.enabled,
+          intervalMinutes:
+            typeof parsed.intervalMinutes === 'number' &&
+            AUTO_INTERVAL_OPTIONS.includes(parsed.intervalMinutes)
+              ? parsed.intervalMinutes
+              : 5,
+        };
+      }
+    } catch {}
+    return { enabled: false, intervalMinutes: 5 };
+  };
+  const [autoConfig, setAutoConfig] = useState<AutoSyncConfig>(loadAutoConfig);
+  const [nextSyncAt, setNextSyncAt] = useState<number | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const autoTimerRef = useRef<number | null>(null);
+  const autoCountdownRef = useRef<number | null>(null);
+  const dmsWindowRef = useRef<Window | null>(null);
+
+  /** 持久化自动同步设置到 localStorage */
+  useEffect(() => {
+    localStorage.setItem(AUTO_SYNC_STORAGE_KEY, JSON.stringify(autoConfig));
+  }, [autoConfig]);
+
+  /** 格式化剩余时间（ms → "X分Y秒"） */
+  const formatCountdown = (ms: number): string => {
+    if (ms <= 0) return '即将同步';
+    const totalSec = Math.ceil(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+  };
+
+  /** 自动同步的主循环：读选中 → 压缩 → 发 hash 给 DMS */
+  const runAutoSync = useCallback(async () => {
+    if (!dmsWindowRef.current || dmsWindowRef.current.closed) {
+      setMessage({ type: 'error', text: 'DMS 接收窗口已关闭，自动同步已停止。请重新勾选自动同步。' });
+      setAutoConfig((c) => ({ ...c, enabled: false }));
+      return;
+    }
+    try {
+      const data = await getSelectedData();
+      if (data.rows.length === 0) {
+        setMessage({
+          type: 'info',
+          text: `[自动同步] 当前无选中记录（${data.tableName} / ${data.viewName}），跳过本次。`,
+        });
+        return;
+      }
+      const payloadRows = data.rows.map((record) => {
+        const obj: Record<string, string> = {};
+        for (const column of data.columns) {
+          obj[column.name] = cellToText(record.fields[column.id] ?? null, column.type);
+        }
+        return obj;
+      });
+      const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payloadRows));
+      if (compressed.length > DMS_MAX_PAYLOAD_CHARS) {
+        setMessage({
+          type: 'error',
+          text: `[自动同步] 数据量过大（${compressed.length} chars），建议拆分视图或改用手动发送。`,
+        });
+        return;
+      }
+      // 复用同一个 DMS 窗口，不新开标签
+      dmsWindowRef.current.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+      setLastSyncAt(Date.now());
+      setMessage({
+        type: 'success',
+        text: `[自动同步] 已发送 ${data.rows.length} 条记录（${data.tableName} / ${data.viewName}）。`,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error ?? '');
+      setMessage({ type: 'error', text: `[自动同步] 失败：${detail}` });
+    }
+  }, []);
+
+  /** 启动/停止自动同步定时器 */
+  useEffect(() => {
+    // 清理上一次
+    if (autoTimerRef.current !== null) {
+      window.clearTimeout(autoTimerRef.current);
+      autoTimerRef.current = null;
+    }
+    if (autoCountdownRef.current !== null) {
+      window.clearInterval(autoCountdownRef.current);
+      autoCountdownRef.current = null;
+    }
+
+    if (!autoConfig.enabled) {
+      setNextSyncAt(null);
+      return;
+    }
+    if (format !== 'dms') {
+      // 用户把格式切到非 DMS → 自动同步无效
+      return;
+    }
+    if (!dmsWindowRef.current || dmsWindowRef.current.closed) {
+      // DMS 窗口还没打开 → 不启动，等用户下次点手动发送时会保存引用
+      return;
+    }
+
+    let cancelled = false;
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const intervalMs = autoConfig.intervalMinutes * 60 * 1000;
+      const target = Date.now() + intervalMs;
+      setNextSyncAt(target);
+
+      autoCountdownRef.current = window.setInterval(() => {
+        setNextSyncAt((prev) => (prev ? Date.now() : null));
+      }, 1000);
+
+      autoTimerRef.current = window.setTimeout(async () => {
+        if (cancelled) return;
+        await runAutoSync();
+        if (!cancelled) scheduleNext();
+      }, intervalMs);
+    };
+
+    // 立即同步一次（延迟 500ms 让 DMS 窗口先加载好）
+    const initialTimer = window.setTimeout(async () => {
+      if (cancelled) return;
+      await runAutoSync();
+      if (!cancelled) scheduleNext();
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialTimer);
+    };
+  }, [autoConfig, format, runAutoSync]);
 
   /** silent=true 时为后台轮询：不切换 loading/警告状态，仅在结果变化时更新界面 */
   const refresh = useCallback(async (silent = false) => {
@@ -96,7 +245,13 @@ export default function App() {
     // 发送到缺陷系统时，必须在任何 await 之前同步打开窗口，否则会被弹窗拦截
     let dmsWindow: Window | null = null;
     if (format === 'dms') {
-      dmsWindow = window.open(DMS_URL, '_blank');
+      // 如果已有未关闭的 DMS 窗口，复用它，避免多开标签
+      if (dmsWindowRef.current && !dmsWindowRef.current.closed) {
+        dmsWindow = dmsWindowRef.current;
+      } else {
+        dmsWindow = window.open(DMS_URL, '_blank');
+        if (dmsWindow) dmsWindowRef.current = dmsWindow;
+      }
     }
     try {
       const data = await getSelectedData();
@@ -144,9 +299,10 @@ export default function App() {
         try {
           // 带数据锚点重新导航，DMS 加载时自动读取导入（沙箱无法拦截页面导航）
           dmsWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+          setLastSyncAt(Date.now());
           setMessage({
             type: 'success',
-            text: `已发送 ${data.rows.length} 条记录到缺陷管理系统，请查看新标签页。${skipNote}`,
+            text: `已发送 ${data.rows.length} 条记录到缺陷管理系统。${skipNote}${autoConfig.enabled ? '（自动同步已启用）' : ''}`,
           });
           void refresh();
         } catch {
@@ -309,6 +465,70 @@ export default function App() {
             <span className="checkbox-text">导出Word</span>
             <span className="checkbox-hint">导出可编辑的 Word 格式工单</span>
           </label>
+        )}
+
+        {/* ====== 自动同步（仅 DMS 模式）====== */}
+        {format === 'dms' && (
+          <>
+            <div className="divider" />
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={autoConfig.enabled}
+                onChange={(e) => {
+                  setAutoConfig((c) => ({ ...c, enabled: e.target.checked }));
+                  if (!e.target.checked) {
+                    setMessage({ type: 'info', text: '自动同步已关闭。' });
+                  }
+                }}
+              />
+              <span className="checkbox-text">自动同步到DMS</span>
+              <span className="checkbox-hint">保持本插件和 DMS 页面都打开，定时发送当前选中记录</span>
+            </label>
+
+            {autoConfig.enabled && (
+              <div className="auto-sync-panel">
+                <div className="auto-sync-row">
+                  <span className="auto-sync-label">同步间隔</span>
+                  <div className="interval-group">
+                    {AUTO_INTERVAL_OPTIONS.map((min) => (
+                      <button
+                        key={min}
+                        type="button"
+                        className={`interval-btn ${autoConfig.intervalMinutes === min ? 'active' : ''}`}
+                        onClick={() => setAutoConfig((c) => ({ ...c, intervalMinutes: min }))}
+                      >
+                        {min}分
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="auto-sync-status">
+                  {dmsWindowRef.current && !dmsWindowRef.current.closed ? (
+                    <>
+                      <span className="status-dot status-active" />
+                      <span className="status-text">DMS 接收窗口就绪</span>
+                      {nextSyncAt && (
+                        <span className="status-countdown">
+                          · 下次同步 {formatCountdown(nextSyncAt - Date.now())}
+                        </span>
+                      )}
+                      {lastSyncAt && (
+                        <span className="status-last">
+                          · 上次 {new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span className="status-dot status-warn" />
+                      <span className="status-text">先点击「一键发送」打开 DMS 窗口，自动同步会自动开始</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
 
