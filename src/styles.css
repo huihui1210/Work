@@ -323,6 +323,20 @@ body {
   cursor: pointer;
 }
 
+/* 去掉浏览器默认的黑色聚焦描边，改用蓝色边框 */
+.interval-select:focus {
+  outline: none;
+  border-color: #3370ff;
+}
+
+/* 上次同步时间：跟在时间选择后面，右对齐 */
+.auto-sync-last {
+  margin-left: auto;
+  font-size: 11px;
+  color: #8f959e;
+  white-space: nowrap;
+}
+
 .auto-sync-status {
   display: flex;
   align-items: center;
@@ -357,8 +371,4 @@ body {
 
 .status-countdown {
   color: #3370ff;
-}
-
-.status-last {
-  color: #8f959e;
 }

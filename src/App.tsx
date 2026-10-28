@@ -529,6 +529,11 @@ export default function App() {
                       </option>
                     ))}
                   </select>
+                  {lastSyncAt && (
+                    <span className="auto-sync-last">
+                      · 上次 {new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
+                    </span>
+                  )}
                 </div>
                 <div className="auto-sync-status">
                   {dmsWindowRef.current && !dmsWindowRef.current.closed ? (
@@ -547,11 +552,6 @@ export default function App() {
                       · 下次同步 {formatCountdown(nextSyncAt - autoNow)}
                     </span>
                   )}
-                  {lastSyncAt && (
-                    <span className="status-last">
-                      · 上次 {new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
-                    </span>
-                  )}
                 </div>
               </div>
             )}
@@ -559,17 +559,19 @@ export default function App() {
         )}
       </section>
 
-      <button type="button" className="primary-btn" disabled={exporting} onClick={() => void handleExport()}>
-        {exporting
-          ? '处理中…'
-          : format === 'dms'
-            ? '一键发送到缺陷分析系统'
-            : format === 'pdf'
-              ? withWord
-                ? '一键导出工单Word'
-                : '一键导出工单PDF'
-              : '一键导出'}
-      </button>
+      {!(format === 'dms' && autoConfig.enabled) && (
+        <button type="button" className="primary-btn" disabled={exporting} onClick={() => void handleExport()}>
+          {exporting
+            ? '处理中…'
+            : format === 'dms'
+              ? '一键发送到缺陷分析系统'
+              : format === 'pdf'
+                ? withWord
+                  ? '一键导出工单Word'
+                  : '一键导出工单PDF'
+                : '一键导出'}
+        </button>
+      )}
 
       {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
 
@@ -578,7 +580,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.1.1</span>
+        <span>v2.1.2</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>
