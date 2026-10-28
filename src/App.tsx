@@ -40,6 +40,8 @@ type MessageType = 'success' | 'error' | 'info';
 const AUTO_INTERVAL_OPTIONS = [1, 3, 5, 10, 30];
 /** localStorage 持久化键：自动同步设置 */
 const AUTO_SYNC_STORAGE_KEY = 'dms-auto-sync-config';
+/** localStorage 持久化键：上次同步时间（跨会话保留） */
+const AUTO_SYNC_LAST_KEY = 'dms-auto-sync-last';
 
 interface AutoSyncConfig {
   enabled: boolean;
@@ -79,12 +81,29 @@ export default function App() {
   };
   const [autoConfig, setAutoConfig] = useState<AutoSyncConfig>(loadAutoConfig);
   const [nextSyncAt, setNextSyncAt] = useState<number | null>(null);
-  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem(AUTO_SYNC_LAST_KEY);
+      const ts = raw ? Number(raw) : NaN;
+      return Number.isFinite(ts) && ts > 0 ? ts : null;
+    } catch {
+      return null;
+    }
+  });
   /** 每秒刷新的当前时间，仅用于驱动倒计时显示 */
   const [autoNow, setAutoNow] = useState(Date.now());
   const autoTimerRef = useRef<number | null>(null);
   const autoCountdownRef = useRef<number | null>(null);
   const dmsWindowRef = useRef<Window | null>(null);
+
+  /** 记录上次同步时间并持久化，重开插件后仍可显示 */
+  const markSynced = () => {
+    const ts = Date.now();
+    setLastSyncAt(ts);
+    try {
+      localStorage.setItem(AUTO_SYNC_LAST_KEY, String(ts));
+    } catch {}
+  };
 
   /** 持久化自动同步间隔（enabled 不持久化，每次打开插件默认关闭） */
   useEffect(() => {
@@ -149,7 +168,7 @@ export default function App() {
       }
       // 给 DMS 窗口导航到带 hash 的新地址，DMS 监听 hashchange 自动刷新
       targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
-      setLastSyncAt(Date.now());
+      markSynced();
       setMessage({
         type: 'success',
         text: `[自动同步] 已发送 ${data.rows.length} 条记录（${data.tableName} / ${data.viewName}）。`,
@@ -310,7 +329,7 @@ export default function App() {
         try {
           // 带数据锚点重新导航，DMS 加载时自动读取导入（沙箱无法拦截页面导航）
           dmsWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
-          setLastSyncAt(Date.now());
+          markSynced();
           setMessage({
             type: 'success',
             text: `已发送 ${data.rows.length} 条记录到缺陷管理系统。${skipNote}${autoConfig.enabled ? '（自动同步已启用）' : ''}`,
@@ -529,11 +548,10 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                  {lastSyncAt && (
-                    <span className="auto-sync-last">
-                      上次同步时间：{new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
-                    </span>
-                  )}
+                  <span className="auto-sync-last">
+                    上次同步时间：
+                    {lastSyncAt ? new Date(lastSyncAt).toLocaleTimeString('zh-CN') : '—'}
+                  </span>
                 </div>
                 <div className="auto-sync-status">
                   {dmsWindowRef.current && !dmsWindowRef.current.closed ? (
@@ -580,7 +598,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.1.4</span>
+        <span>v2.1.5</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>
