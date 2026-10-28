@@ -98,13 +98,23 @@ export default function App() {
     return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
   };
 
-  /** 自动同步的主循环：读选中 → 压缩 → 发 hash 给 DMS */
+  /** 自动同步的主循环：读选中 → 压缩 → 发 hash 给 DMS
+   *  每次同步都主动 window.open(DMS_URL, 'dms-da-main')：
+   *  - 已存在的 DMS 窗口 → 返回它的引用（聚焦，但不新开）
+   *  - 不存在 → 新开一个并命名为 dms-da-main
+   *  接收站插件 / 分输站插件 用同一个 name，共用同一个 DMS 窗口。
+   *  DMS 端 checkAndRedirect 会按缺陷编号长度自动跳到正确界面。
+   */
   const runAutoSync = useCallback(async () => {
-    if (!dmsWindowRef.current || dmsWindowRef.current.closed) {
-      setMessage({ type: 'error', text: 'DMS 接收窗口已关闭，自动同步已停止。请重新勾选自动同步。' });
-      setAutoConfig((c) => ({ ...c, enabled: false }));
+    const targetWindow = window.open(DMS_URL, 'dms-da-main');
+    if (!targetWindow) {
+      setMessage({
+        type: 'error',
+        text: '浏览器拦截了 DMS 弹窗。请允许本页面弹出窗口后重试，或改用手动发送。',
+      });
       return;
     }
+    dmsWindowRef.current = targetWindow;
     try {
       const data = await getSelectedData();
       if (data.rows.length === 0) {
@@ -129,8 +139,8 @@ export default function App() {
         });
         return;
       }
-      // 复用同一个 DMS 窗口，不新开标签
-      dmsWindowRef.current.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+      // 给 DMS 窗口导航到带 hash 的新地址，DMS 监听 hashchange 自动刷新
+      targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
       setLastSyncAt(Date.now());
       setMessage({
         type: 'success',
@@ -162,10 +172,6 @@ export default function App() {
       // 用户把格式切到非 DMS → 自动同步无效
       return;
     }
-    if (!dmsWindowRef.current || dmsWindowRef.current.closed) {
-      // DMS 窗口还没打开 → 不启动，等用户下次点手动发送时会保存引用
-      return;
-    }
 
     let cancelled = false;
     const scheduleNext = () => {
@@ -185,12 +191,12 @@ export default function App() {
       }, intervalMs);
     };
 
-    // 立即同步一次（延迟 500ms 让 DMS 窗口先加载好）
+    // 立即同步一次（延迟 800ms：等 hash 能覆盖上次的导航）
     const initialTimer = window.setTimeout(async () => {
       if (cancelled) return;
       await runAutoSync();
       if (!cancelled) scheduleNext();
-    }, 500);
+    }, 800);
 
     return () => {
       cancelled = true;
@@ -249,7 +255,7 @@ export default function App() {
       if (dmsWindowRef.current && !dmsWindowRef.current.closed) {
         dmsWindow = dmsWindowRef.current;
       } else {
-        dmsWindow = window.open(DMS_URL, '_blank');
+        dmsWindow = window.open(DMS_URL, 'dms-da-main');
         if (dmsWindow) dmsWindowRef.current = dmsWindow;
       }
     }
@@ -522,7 +528,7 @@ export default function App() {
                   ) : (
                     <>
                       <span className="status-dot status-warn" />
-                      <span className="status-text">先点击「一键发送」打开 DMS 窗口，自动同步会自动开始</span>
+                      <span className="status-text">尚未检测到 DMS 窗口（定时器首次同步时会自动打开）</span>
                     </>
                   )}
                 </div>
