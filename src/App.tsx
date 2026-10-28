@@ -37,7 +37,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
 type MessageType = 'success' | 'error' | 'info';
 
 /** 自动同步间隔选项（分钟） */
-const AUTO_INTERVAL_OPTIONS = [3, 5, 10, 30];
+const AUTO_INTERVAL_OPTIONS = [1, 3, 5, 10, 30];
 /** localStorage 持久化键：自动同步设置 */
 const AUTO_SYNC_STORAGE_KEY = 'dms-auto-sync-config';
 
@@ -66,28 +66,33 @@ export default function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         return {
-          enabled: !!parsed.enabled,
+          enabled: false,
           intervalMinutes:
             typeof parsed.intervalMinutes === 'number' &&
-            AUTO_INTERVAL_OPTIONS.includes(parsed.intervalMinutes)
+              AUTO_INTERVAL_OPTIONS.includes(parsed.intervalMinutes)
               ? parsed.intervalMinutes
               : 5,
         };
       }
-    } catch {}
+    } catch { }
     return { enabled: false, intervalMinutes: 5 };
   };
   const [autoConfig, setAutoConfig] = useState<AutoSyncConfig>(loadAutoConfig);
   const [nextSyncAt, setNextSyncAt] = useState<number | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  /** 每秒刷新的当前时间，仅用于驱动倒计时显示 */
+  const [autoNow, setAutoNow] = useState(Date.now());
   const autoTimerRef = useRef<number | null>(null);
   const autoCountdownRef = useRef<number | null>(null);
   const dmsWindowRef = useRef<Window | null>(null);
 
-  /** 持久化自动同步设置到 localStorage */
+  /** 持久化自动同步间隔（enabled 不持久化，每次打开插件默认关闭） */
   useEffect(() => {
-    localStorage.setItem(AUTO_SYNC_STORAGE_KEY, JSON.stringify(autoConfig));
-  }, [autoConfig]);
+    localStorage.setItem(
+      AUTO_SYNC_STORAGE_KEY,
+      JSON.stringify({ intervalMinutes: autoConfig.intervalMinutes }),
+    );
+  }, [autoConfig.intervalMinutes]);
 
   /** 格式化剩余时间（ms → "X分Y秒"） */
   const formatCountdown = (ms: number): string => {
@@ -100,14 +105,16 @@ export default function App() {
   };
 
   /** 自动同步的主循环：读选中 → 压缩 → 发 hash 给 DMS
-   *  每次同步都主动 window.open(DMS_URL, 'dms-da-main')：
-   *  - 已存在的 DMS 窗口 → 返回它的引用（聚焦，但不新开）
-   *  - 不存在 → 新开一个并命名为 dms-da-main
-   *  接收站插件 / 分输站插件 用同一个 name，共用同一个 DMS 窗口。
+   *  窗口策略：插件自管一个名为 dms-da-main 的 DMS 标签页。
+   *  - 已有可用引用 → 直接复用（只改 hash，不聚焦/不跳转标签页）
+   *  - 引用不存在或已关闭 → 新开一个
+   *  首次勾选时已在点击手势内同步打开窗口，后续定时同步复用该窗口。
    *  DMS 端 checkAndRedirect 会按缺陷编号长度自动跳到正确界面。
    */
   const runAutoSync = useCallback(async () => {
-    const targetWindow = window.open(DMS_URL, 'dms-da-main');
+    const existing = dmsWindowRef.current;
+    const targetWindow =
+      existing && !existing.closed ? existing : window.open(DMS_URL, 'dms-da-main');
     if (!targetWindow) {
       setMessage({
         type: 'error',
@@ -153,7 +160,7 @@ export default function App() {
     }
   }, []);
 
-  /** 启动/停止自动同步定时器 */
+  /** 启动/停止自动同步定时器（首次同步由勾选动作触发，这里只负责后续定时） */
   useEffect(() => {
     // 清理上一次
     if (autoTimerRef.current !== null) {
@@ -165,26 +172,21 @@ export default function App() {
       autoCountdownRef.current = null;
     }
 
-    if (!autoConfig.enabled) {
+    if (!autoConfig.enabled || format !== 'dms') {
       setNextSyncAt(null);
-      return;
-    }
-    if (format !== 'dms') {
-      // 用户把格式切到非 DMS → 自动同步无效
       return;
     }
 
     let cancelled = false;
+    const intervalMs = autoConfig.intervalMinutes * 60 * 1000;
+
+    // 倒计时：目标时间固定，每秒只刷新“当前时间”
+    autoCountdownRef.current = window.setInterval(() => setAutoNow(Date.now()), 1000);
+
     const scheduleNext = () => {
       if (cancelled) return;
-      const intervalMs = autoConfig.intervalMinutes * 60 * 1000;
-      const target = Date.now() + intervalMs;
-      setNextSyncAt(target);
-
-      autoCountdownRef.current = window.setInterval(() => {
-        setNextSyncAt((prev) => (prev ? Date.now() : null));
-      }, 1000);
-
+      setAutoNow(Date.now());
+      setNextSyncAt(Date.now() + intervalMs);
       autoTimerRef.current = window.setTimeout(async () => {
         if (cancelled) return;
         await runAutoSync();
@@ -192,11 +194,18 @@ export default function App() {
       }, intervalMs);
     };
 
-    // 勾选后等间隔到点才首次同步（不在勾选瞬间立即导航 DMS 影响用户）
     scheduleNext();
 
     return () => {
       cancelled = true;
+      if (autoTimerRef.current !== null) {
+        window.clearTimeout(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
+      if (autoCountdownRef.current !== null) {
+        window.clearInterval(autoCountdownRef.current);
+        autoCountdownRef.current = null;
+      }
     };
   }, [autoConfig, format, runAutoSync]);
 
@@ -478,14 +487,29 @@ export default function App() {
                 type="checkbox"
                 checked={autoConfig.enabled}
                 onChange={(e) => {
-                  setAutoConfig((c) => ({ ...c, enabled: e.target.checked }));
-                  if (!e.target.checked) {
+                  if (e.target.checked) {
+                    // 在用户点击手势内同步打开窗口，避免被浏览器拦截；勾选后立即发送一次
+                    if (!dmsWindowRef.current || dmsWindowRef.current.closed) {
+                      const win = window.open(DMS_URL, 'dms-da-main');
+                      if (!win) {
+                        setMessage({
+                          type: 'error',
+                          text: '浏览器拦截了 DMS 弹窗，请允许本页面弹出窗口后重试。',
+                        });
+                        return;
+                      }
+                      dmsWindowRef.current = win;
+                    }
+                    setAutoConfig((c) => ({ ...c, enabled: true }));
+                    void runAutoSync();
+                  } else {
+                    setAutoConfig((c) => ({ ...c, enabled: false }));
                     setMessage({ type: 'info', text: '自动同步已关闭。' });
                   }
                 }}
               />
-              <span className="checkbox-text">自动同步到DMS</span>
-              <span className="checkbox-hint">保持本插件和 DMS 页面都打开，定时发送当前选中记录</span>
+              <span className="checkbox-text">自动同步</span>
+              <span className="checkbox-hint">勾选后立即发送一次，之后按所选间隔自动发送当前选中记录</span>
             </label>
 
             {autoConfig.enabled && (
@@ -510,22 +534,22 @@ export default function App() {
                     <>
                       <span className="status-dot status-active" />
                       <span className="status-text">DMS 接收窗口就绪</span>
-                      {nextSyncAt && (
-                        <span className="status-countdown">
-                          · 下次同步 {formatCountdown(nextSyncAt - Date.now())}
-                        </span>
-                      )}
-                      {lastSyncAt && (
-                        <span className="status-last">
-                          · 上次 {new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
-                        </span>
-                      )}
                     </>
                   ) : (
                     <>
                       <span className="status-dot status-warn" />
-                      <span className="status-text">尚未检测到 DMS 窗口（定时器首次同步时会自动打开）</span>
+                      <span className="status-text">DMS 窗口未打开</span>
                     </>
+                  )}
+                  {nextSyncAt && (
+                    <span className="status-countdown">
+                      · 下次同步 {formatCountdown(nextSyncAt - autoNow)}
+                    </span>
+                  )}
+                  {lastSyncAt && (
+                    <span className="status-last">
+                      · 上次 {new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
+                    </span>
                   )}
                 </div>
               </div>
@@ -553,7 +577,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.0.10</span>
+        <span>v2.1.0</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>
