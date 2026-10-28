@@ -102,7 +102,7 @@ export default function App() {
     setLastSyncAt(ts);
     try {
       localStorage.setItem(AUTO_SYNC_LAST_KEY, String(ts));
-    } catch {}
+    } catch { }
   };
 
   /** 持久化自动同步间隔（enabled 不持久化，每次打开插件默认关闭） */
@@ -534,7 +534,7 @@ export default function App() {
             {autoConfig.enabled && (
               <div className="auto-sync-panel">
                 <div className="auto-sync-row">
-                  <span className="auto-sync-label">同步间隔：</span>
+                  <span className="auto-sync-label">同步间隔</span>
                   <select
                     className="interval-select"
                     value={autoConfig.intervalMinutes}
@@ -598,7 +598,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.1.5</span>
+        <span>v2.1.6</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>
