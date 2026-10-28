@@ -515,7 +515,7 @@ export default function App() {
             {autoConfig.enabled && (
               <div className="auto-sync-panel">
                 <div className="auto-sync-row">
-                  <span className="auto-sync-label">同步间隔</span>
+                  <span className="auto-sync-label">同步间隔时间：</span>
                   <select
                     className="interval-select"
                     value={autoConfig.intervalMinutes}
@@ -531,7 +531,7 @@ export default function App() {
                   </select>
                   {lastSyncAt && (
                     <span className="auto-sync-last">
-                      · 上次 {new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
+                      上次同步时间：{new Date(lastSyncAt).toLocaleTimeString('zh-CN')}
                     </span>
                   )}
                 </div>
@@ -580,7 +580,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.1.2</span>
+        <span>v2.1.3</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>

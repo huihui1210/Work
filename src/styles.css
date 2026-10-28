@@ -300,7 +300,8 @@ body {
 .auto-sync-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
 }
 
 .auto-sync-label {
@@ -312,8 +313,8 @@ body {
 
 .interval-select {
   height: 28px;
-  min-width: 88px;
-  padding: 0 8px;
+  min-width: 84px;
+  padding: 0 6px;
   border: 1px solid #dee0e3;
   border-radius: 4px;
   background: #fff;
@@ -323,13 +324,14 @@ body {
   cursor: pointer;
 }
 
-/* 去掉浏览器默认的黑色聚焦描边，改用蓝色边框 */
-.interval-select:focus {
+/* 聚焦时不保留黑色描边，边框始终保持灰色常态 */
+.interval-select:focus,
+.interval-select:focus-visible {
   outline: none;
-  border-color: #3370ff;
+  border-color: #dee0e3;
 }
 
-/* 上次同步时间：跟在时间选择后面，右对齐 */
+/* 上次同步时间：跟在时间选择后面，右对齐；空间不足时自动换行 */
 .auto-sync-last {
   margin-left: auto;
   font-size: 11px;
