@@ -310,33 +310,17 @@ body {
   white-space: nowrap;
 }
 
-.interval-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.interval-btn {
-  padding: 4px 10px;
+.interval-select {
+  height: 28px;
+  min-width: 88px;
+  padding: 0 8px;
   border: 1px solid #dee0e3;
   border-radius: 4px;
   background: #fff;
-  color: #646a73;
+  color: #1f2329;
+  font-family: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
-}
-
-.interval-btn:hover {
-  border-color: #3370ff;
-  color: #3370ff;
-}
-
-.interval-btn.active {
-  border-color: #3370ff;
-  background: #e8f1ff;
-  color: #3370ff;
-  font-weight: 500;
 }
 
 .auto-sync-status {

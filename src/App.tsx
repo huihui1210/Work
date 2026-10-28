@@ -463,7 +463,7 @@ export default function App() {
               onChange={(e) => setWithImages(e.target.checked)}
             />
             <span className="checkbox-text">导出图片</span>
-            <span className="checkbox-hint">不勾选则不导出缺陷图片</span>
+            <span className="checkbox-hint">导出缺陷记录附带缺陷图片</span>
           </label>
         )}
         {format === 'pdf' && (
@@ -509,25 +509,26 @@ export default function App() {
                 }}
               />
               <span className="checkbox-text">自动同步</span>
-              <span className="checkbox-hint">勾选后立即发送一次，之后按所选间隔自动发送当前选中记录</span>
+              <span className="checkbox-hint">勾选要同步的缺陷记录</span>
             </label>
 
             {autoConfig.enabled && (
               <div className="auto-sync-panel">
                 <div className="auto-sync-row">
                   <span className="auto-sync-label">同步间隔</span>
-                  <div className="interval-group">
+                  <select
+                    className="interval-select"
+                    value={autoConfig.intervalMinutes}
+                    onChange={(e) =>
+                      setAutoConfig((c) => ({ ...c, intervalMinutes: Number(e.target.value) }))
+                    }
+                  >
                     {AUTO_INTERVAL_OPTIONS.map((min) => (
-                      <button
-                        key={min}
-                        type="button"
-                        className={`interval-btn ${autoConfig.intervalMinutes === min ? 'active' : ''}`}
-                        onClick={() => setAutoConfig((c) => ({ ...c, intervalMinutes: min }))}
-                      >
-                        {min}分
-                      </button>
+                      <option key={min} value={min}>
+                        {min} 分钟
+                      </option>
                     ))}
-                  </div>
+                  </select>
                 </div>
                 <div className="auto-sync-status">
                   {dmsWindowRef.current && !dmsWindowRef.current.closed ? (
@@ -577,7 +578,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.1.0</span>
+        <span>v2.1.1</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>
