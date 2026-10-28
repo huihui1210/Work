@@ -91,7 +91,8 @@ export default function App() {
 
   /** 格式化剩余时间（ms → "X分Y秒"） */
   const formatCountdown = (ms: number): string => {
-    if (ms <= 0) return '即将同步';
+    if (ms < 0) return '同步中…';
+    if (ms === 0) return '即将同步';
     const totalSec = Math.ceil(ms / 1000);
     const min = Math.floor(totalSec / 60);
     const sec = totalSec % 60;
@@ -191,16 +192,11 @@ export default function App() {
       }, intervalMs);
     };
 
-    // 立即同步一次（延迟 800ms：等 hash 能覆盖上次的导航）
-    const initialTimer = window.setTimeout(async () => {
-      if (cancelled) return;
-      await runAutoSync();
-      if (!cancelled) scheduleNext();
-    }, 800);
+    // 勾选后等间隔到点才首次同步（不在勾选瞬间立即导航 DMS 影响用户）
+    scheduleNext();
 
     return () => {
       cancelled = true;
-      window.clearTimeout(initialTimer);
     };
   }, [autoConfig, format, runAutoSync]);
 
@@ -557,7 +553,7 @@ export default function App() {
         工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
       </p>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.0.9</span>
+        <span>v2.0.10</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
     </div>
