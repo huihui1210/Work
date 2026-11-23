@@ -65,8 +65,10 @@ export default function App() {
   /** 首次进入助手页后才挂载 iframe，避免不必要地请求内网地址 */
   const [assistantMounted, setAssistantMounted] = useState(false);
   const [assistantKey, setAssistantKey] = useState(0);
-  /** 已生成待拖入对话窗的 CSV 文件 */
-  const [agentFile, setAgentFile] = useState<File | null>(null);
+  /** 复制数据到剪贴板进行中 */
+  const [copying, setCopying] = useState(false);
+  /** 浏览器拦截剪贴板时的降级文本 */
+  const [copyFallback, setCopyFallback] = useState<string | null>(null);
 
   const refreshingRef = useRef(false);
   const pendingRefreshRef = useRef(false);
@@ -440,35 +442,83 @@ export default function App() {
     setTab('assistant');
   };
 
-  /** 助手页内快捷导出 CSV，生成后直接拖进对话框即可 */
-  const handleQuickCsvExport = async () => {
-    if (exporting) return;
-    setExporting(true);
+  /** 写入剪贴板；失败时返回 false，由界面弹窗兜底 */
+  const writeClipboard = async (text: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // 继续尝试降级方案
+    }
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
+  /** 把选中记录复制成文本（CSV 或列式 JSON），粘贴到对话框即可提问 */
+  const handleCopyData = async (kind: 'csv' | 'json') => {
+    if (copying) return;
+    setCopying(true);
     setMessage(null);
     try {
       const data = await getSelectedData();
       if (data.rows.length === 0) {
-        setMessage({ type: 'info', text: '请先在表格视图中勾选要导出的记录。' });
+        setMessage({ type: 'info', text: '请先在表格视图中勾选要复制的记录。' });
         return;
       }
       const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
-      const blob = await buildFileBlob('csv', columns, data.rows, data.viewName);
-      const file = new File([blob], buildFilename(`${data.tableName}_${data.viewName}`, 'csv'), {
-        type: 'text/csv;charset=utf-8',
-      });
-      // 不直接下载，留在内存里供拖拽；需要落盘时点「下载」
-      setAgentFile(file);
+      let body: string;
+      if (kind === 'csv') {
+        const blob = await buildFileBlob('csv', columns, data.rows, data.viewName);
+        body = (await blob.text()).replace(/^\uFEFF/, '');
+      } else {
+        body = JSON.stringify({
+          columns: columns.map((col) => col.name),
+          rows: data.rows.map((record) =>
+            columns.map((col) => cellToText(record.fields[col.id] ?? null, col.type)),
+          ),
+        });
+      }
+      const payload = [
+        '请根据以下表格数据回答我的问题。',
+        `表名：${data.tableName}；视图：${data.viewName}；共 ${data.rows.length} 条记录，${columns.length} 列。`,
+        '',
+        body,
+        '',
+        '我的问题：',
+      ].join('\n');
+      const ok = await writeClipboard(payload);
+      if (!ok) {
+        setCopyFallback(payload);
+        setMessage({ type: 'info', text: '无法自动写入剪贴板，请在弹窗中按 Ctrl+C 复制。' });
+        return;
+      }
       const skipNote =
         data.failedRecordCount > 0 ? `（另有 ${data.failedRecordCount} 条读取失败已跳过）` : '';
+      const sizeNote =
+        payload.length > 60000
+          ? ' 内容较长，若对话框提示超限，请缩小勾选范围后重试。'
+          : '';
       setMessage({
         type: 'success',
-        text: `已生成 ${data.rows.length} 条记录的 CSV，把下方文件块直接拖进对话框即可分析。${skipNote}`,
+        text: `已复制 ${data.rows.length} 条记录（约 ${payload.length.toLocaleString()} 字符）。点下方对话框按 Ctrl+V 粘贴，再输入问题。${skipNote}${sizeNote}`,
       });
-      void refresh();
     } catch (error) {
       setMessage({ type: 'error', text: errorToMessage(error) });
     } finally {
-      setExporting(false);
+      setCopying(false);
     }
   };
 
@@ -676,10 +726,18 @@ export default function App() {
             <button
               type="button"
               className="text-btn"
-              disabled={exporting}
-              onClick={() => void handleQuickCsvExport()}
+              disabled={copying}
+              onClick={() => void handleCopyData('csv')}
             >
-              {exporting ? '导出中…' : '导出 CSV'}
+              {copying ? '复制中…' : '复制CSV'}
+            </button>
+            <button
+              type="button"
+              className="text-btn"
+              disabled={copying}
+              onClick={() => void handleCopyData('json')}
+            >
+              复制JSON
             </button>
             <button type="button" className="text-btn" onClick={() => setAssistantKey((k) => k + 1)}>
               刷新
@@ -691,31 +749,6 @@ export default function App() {
 
           {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
 
-          {agentFile && (
-            <div className="agent-file-row">
-              <div
-                className="agent-file-chip"
-                draggable
-                title="按住拖进对话框"
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = 'copy';
-                  e.dataTransfer.items.add(agentFile);
-                }}
-              >
-                <span className="agent-file-badge">CSV</span>
-                <span className="agent-file-name">{agentFile.name}</span>
-                <span className="agent-file-action">拖进对话框</span>
-              </div>
-              <button
-                type="button"
-                className="text-btn"
-                onClick={() => downloadBlob(agentFile, agentFile.name)}
-              >
-                下载
-              </button>
-            </div>
-          )}
-
           <iframe
             key={assistantKey}
             className="assistant-frame"
@@ -725,9 +758,30 @@ export default function App() {
           />
 
           <p className="assistant-hint">
-            在「导出」页勾选记录 → 点上方「导出 CSV」→ 按住 CSV 文件块拖进对话框；
-            拖不进去就点「下载」，再从浏览器下载栏拖入。上方空白说明平台不允许内嵌，请点「新窗口」。
+            在「导出」页勾选记录 → 点上方「复制CSV」→ 点下方对话框按 Ctrl+V 粘贴 → 输入问题。
+            粘贴的是文本不是附件；内容过长时请缩小勾选范围。上方空白说明平台不允许内嵌，请点「新窗口」。
           </p>
+        </div>
+      )}
+
+      {copyFallback !== null && (
+        <div className="copy-modal-mask" onClick={() => setCopyFallback(null)}>
+          <div className="copy-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="copy-modal-title">复制数据</div>
+            <p className="copy-modal-hint">浏览器拦截了自动复制，请全选后按 Ctrl+C。</p>
+            <textarea
+              className="copy-modal-text"
+              readOnly
+              autoFocus
+              value={copyFallback}
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <div className="copy-modal-actions">
+              <button type="button" className="primary-btn" onClick={() => setCopyFallback(null)}>
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -449,58 +449,56 @@ body {
   background: #fff;
 }
 
-/* 可拖拽的 CSV 文件块 */
-.agent-file-row {
+/* 剪贴板被拦截时的降级弹窗 */
+.copy-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.35);
 }
 
-.agent-file-chip {
-  flex: 1;
-  min-width: 0;
+.copy-modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  padding: 8px 10px;
-  border: 1px dashed #3370ff;
-  border-radius: 6px;
-  background: #f0f5ff;
-  cursor: grab;
-  user-select: none;
+  padding: 14px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
-.agent-file-chip:active {
-  cursor: grabbing;
-}
-
-.agent-file-badge {
-  flex-shrink: 0;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: #3370ff;
-  color: #fff;
-  font-size: 10px;
+.copy-modal-title {
+  font-size: 14px;
   font-weight: 600;
-  line-height: 1.4;
+  color: #1f2329;
 }
 
-.agent-file-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.copy-modal-hint {
+  margin: 0;
   font-size: 12px;
-  color: #245bdb;
+  color: #646a73;
 }
 
-.agent-file-action {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: #3370ff;
-  white-space: nowrap;
+.copy-modal-text {
+  flex: 1;
+  min-height: 160px;
+  padding: 8px;
+  border: 1px solid #dee0e3;
+  border-radius: 6px;
+  font: 12px/1.5 Consolas, monospace;
+  resize: vertical;
+}
+
+.copy-modal-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .assistant-hint {
