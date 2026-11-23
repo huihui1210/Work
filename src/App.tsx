@@ -26,6 +26,9 @@ interface FormatOption {
 const DMS_URL = 'https://huihui1210.github.io/DMS_DA/';
 /** 压缩后锚点的安全长度上限，超出则退回 Excel 下载 */
 const DMS_MAX_PAYLOAD_CHARS = 1_500_000;
+/** 设备缺陷分析助手分享链接（内网地址） */
+const AGENT_URL =
+  'https://agents.cnooc.com.cn/share/eOzEl9oq6nZb80Yzp8yy5Bc1VhRnOdjd6exWvQ1NCGSGIyXP_aM7uA-sTCMJbK92LCrMEfUf-9PmQJ8mkLf5fQ';
 
 const FORMAT_OPTIONS: FormatOption[] = [
   { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
@@ -57,6 +60,11 @@ export default function App() {
   const [withWord, setWithWord] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
+  /** 顶部页签：导出 / 智能助手 */
+  const [tab, setTab] = useState<'export' | 'assistant'>('export');
+  /** 首次进入助手页后才挂载 iframe，避免不必要地请求内网地址 */
+  const [assistantMounted, setAssistantMounted] = useState(false);
+  const [assistantKey, setAssistantKey] = useState(0);
 
   const refreshingRef = useRef(false);
   const pendingRefreshRef = useRef(false);
@@ -424,8 +432,60 @@ export default function App() {
     }
   };
 
+  /** 切到助手页；首次进入时挂载 iframe，之后保留对话状态 */
+  const openAssistant = () => {
+    setAssistantMounted(true);
+    setTab('assistant');
+  };
+
+  /** 助手页内快捷导出 CSV，生成后直接拖进对话框即可 */
+  const handleQuickCsvExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setMessage(null);
+    try {
+      const data = await getSelectedData();
+      if (data.rows.length === 0) {
+        setMessage({ type: 'info', text: '请先在表格视图中勾选要导出的记录。' });
+        return;
+      }
+      const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
+      const blob = await buildFileBlob('csv', columns, data.rows, data.viewName);
+      downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'csv'));
+      const skipNote =
+        data.failedRecordCount > 0 ? `（另有 ${data.failedRecordCount} 条读取失败已跳过）` : '';
+      setMessage({
+        type: 'success',
+        text: `已导出 ${data.rows.length} 条记录为 CSV，把下载的文件拖进对话框即可分析。${skipNote}`,
+      });
+      void refresh();
+    } catch (error) {
+      setMessage({ type: 'error', text: errorToMessage(error) });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
-    <div className="app">
+    <div className={`app${tab === 'assistant' ? ' app-assistant' : ''}`}>
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab${tab === 'export' ? ' active' : ''}`}
+          onClick={() => setTab('export')}
+        >
+          导出
+        </button>
+        <button
+          type="button"
+          className={`tab${tab === 'assistant' ? ' active' : ''}`}
+          onClick={openAssistant}
+        >
+          智能助手
+        </button>
+      </div>
+
+      <div className="export-body" style={{ display: tab === 'export' ? 'flex' : 'none' }}>
       <header className="header">
         <div className="header-icon">⇩</div>
         <div>
@@ -601,6 +661,43 @@ export default function App() {
         <span>v2.1.6</span>
         <span>{new Date().toLocaleDateString('zh-CN')}</span>
       </div>
+      </div>
+
+      {assistantMounted && (
+        <div className="assistant-body" style={{ display: tab === 'assistant' ? 'flex' : 'none' }}>
+          <div className="assistant-toolbar">
+            <span className="assistant-title">设备缺陷分析助手</span>
+            <button
+              type="button"
+              className="text-btn"
+              disabled={exporting}
+              onClick={() => void handleQuickCsvExport()}
+            >
+              {exporting ? '导出中…' : '导出 CSV'}
+            </button>
+            <button type="button" className="text-btn" onClick={() => setAssistantKey((k) => k + 1)}>
+              刷新
+            </button>
+            <a className="text-btn" href={AGENT_URL} target="_blank" rel="noreferrer">
+              新窗口
+            </a>
+          </div>
+
+          <iframe
+            key={assistantKey}
+            className="assistant-frame"
+            src={AGENT_URL}
+            title="设备缺陷分析助手"
+            allow="clipboard-read; clipboard-write"
+          />
+
+          {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
+          <p className="assistant-hint">
+            在「导出」页勾选记录后，点上方「导出 CSV」生成文件，再把下载的文件拖进对话框即可分析。
+            如果上方空白，说明平台不允许内嵌，请点「新窗口」打开。
+          </p>
+        </div>
+      )}
     </div>
   );
 }
