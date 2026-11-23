@@ -31,10 +31,10 @@ const AGENT_URL =
   'https://agents.cnooc.com.cn/share/eOzEl9oq6nZb80Yzp8yy5Bc1VhRnOdjd6exWvQ1NCGSGIyXP_aM7uA-sTCMJbK92LCrMEfUf-9PmQJ8mkLf5fQ';
 
 const FORMAT_OPTIONS: FormatOption[] = [
-  { value: 'xlsx', label: 'Excel', desc: '.xlsx 推荐' },
-  { value: 'csv', label: 'CSV', desc: '.csv 通用' },
-  { value: 'pdf', label: '工单PDF', desc: '缺陷处理工单' },
-  { value: 'dms', label: '缺陷分析系统', desc: '一键发送' },
+  { value: 'xlsx', label: 'Excel', desc: '推荐' },
+  { value: 'csv', label: 'CSV', desc: '通用' },
+  { value: 'pdf', label: '工单PDF', desc: '可打印' },
+  { value: 'dms', label: '缺陷分析系统', desc: '发送数据' },
 ];
 
 type MessageType = 'success' | 'error' | 'info';
@@ -60,6 +60,15 @@ export default function App() {
   const [withWord, setWithWord] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
+  /** 提示条自动消失：成功/信息 3 秒，错误 6 秒 */
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(
+      () => setMessage(null),
+      message.type === 'error' ? 6000 : 3000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [message]);
   /** 顶部页签：导出 / 智能助手 */
   const [tab, setTab] = useState<'export' | 'assistant'>('export');
   /** 首次进入助手页后才挂载 iframe，避免不必要地请求内网地址 */
@@ -307,7 +316,7 @@ export default function App() {
           text:
             data.failedRecordCount > 0
               ? `选中的 ${data.failedRecordCount} 条记录读取失败，可能包含异常单元格（如错误公式），已无法导出。`
-              : '请先在表格视图中勾选要导出的记录。',
+              : '请先勾选记录。',
         });
         return;
       }
@@ -475,7 +484,7 @@ export default function App() {
     try {
       const data = await getSelectedData();
       if (data.rows.length === 0) {
-        setMessage({ type: 'info', text: '请先在表格视图中勾选要复制的记录。' });
+        setMessage({ type: 'info', text: '请先勾选记录。' });
         return;
       }
       const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
@@ -508,12 +517,10 @@ export default function App() {
       const skipNote =
         data.failedRecordCount > 0 ? `（另有 ${data.failedRecordCount} 条读取失败已跳过）` : '';
       const sizeNote =
-        payload.length > 60000
-          ? ' 内容较长，若对话框提示超限，请缩小勾选范围后重试。'
-          : '';
+        payload.length > 60000 ? ' 内容较长，超限时请缩小勾选范围。' : '';
       setMessage({
         type: 'success',
-        text: `已复制 ${data.rows.length} 条记录（约 ${payload.length.toLocaleString()} 字符）。点下方对话框按 Ctrl+V 粘贴，再输入问题。${skipNote}${sizeNote}`,
+        text: `已复制 ${data.rows.length} 条（约 ${payload.length.toLocaleString()} 字符），在对话框按 Ctrl+V 粘贴。${skipNote}${sizeNote}`,
       });
     } catch (error) {
       setMessage({ type: 'error', text: errorToMessage(error) });
@@ -521,6 +528,21 @@ export default function App() {
       setCopying(false);
     }
   };
+
+  const renderMessage = () =>
+    message ? (
+      <div className={`banner banner-${message.type}`} role="status">
+        <span className="banner-text">{message.text}</span>
+        <button
+          type="button"
+          className="banner-close"
+          aria-label="关闭提示"
+          onClick={() => setMessage(null)}
+        >
+          ×
+        </button>
+      </div>
+    ) : null;
 
   return (
     <div className={`app${tab === 'assistant' ? ' app-assistant' : ''}`}>
@@ -545,14 +567,13 @@ export default function App() {
       <header className="header">
         <div className="header-icon">⇩</div>
         <div>
-          <h1>一键导出选中内容</h1>
-          <p className="subtitle">勾选记录，导出为 Excel / CSV / 工单PDF</p>
+          <h1>导出选中记录</h1>
         </div>
       </header>
 
       {notInHost && (
         <div className="banner banner-warning">
-          当前页面未运行在多维表格边栏中。请在多维表格里通过「插件 → 自定义插件」添加本服务地址，不要直接用浏览器打开。
+          未在多维表格中运行。请通过「插件 → 自定义插件」加载本页面。
         </div>
       )}
 
@@ -571,7 +592,7 @@ export default function App() {
           {selection ? `${selection.tableName} / ${selection.viewName}` : '未检测到数据表'}
         </p>
         {selection && !selection.multiSelectSupported && (
-          <p className="hint">当前视图不支持读取多选，切换到「表格」视图可勾选多条记录。</p>
+          <p className="hint">当前视图不支持多选，请切换到「表格」视图。</p>
         )}
       </section>
 
@@ -598,7 +619,6 @@ export default function App() {
               onChange={(e) => setWithImages(e.target.checked)}
             />
             <span className="checkbox-text">导出图片</span>
-            <span className="checkbox-hint">导出缺陷记录附带缺陷图片</span>
           </label>
         )}
         {format === 'pdf' && (
@@ -608,8 +628,7 @@ export default function App() {
               checked={withWord}
               onChange={(e) => setWithWord(e.target.checked)}
             />
-            <span className="checkbox-text">导出Word</span>
-            <span className="checkbox-hint">导出可编辑的 Word 格式工单</span>
+            <span className="checkbox-text">导出 Word</span>
           </label>
         )}
 
@@ -644,7 +663,6 @@ export default function App() {
                 }}
               />
               <span className="checkbox-text">自动同步</span>
-              <span className="checkbox-hint">勾选要同步的缺陷记录</span>
             </label>
 
             {autoConfig.enabled && (
@@ -665,7 +683,7 @@ export default function App() {
                     ))}
                   </select>
                   <span className="auto-sync-last">
-                    上次同步时间：
+                    上次同步：
                     {lastSyncAt ? new Date(lastSyncAt).toLocaleTimeString('zh-CN') : '—'}
                   </span>
                 </div>
@@ -673,12 +691,12 @@ export default function App() {
                   {dmsWindowRef.current && !dmsWindowRef.current.closed ? (
                     <>
                       <span className="status-dot status-active" />
-                      <span className="status-text">DMS 接收窗口就绪</span>
+                      <span className="status-text">接收窗口已就绪</span>
                     </>
                   ) : (
                     <>
                       <span className="status-dot status-warn" />
-                      <span className="status-text">DMS 窗口未打开</span>
+                      <span className="status-text">接收窗口未打开</span>
                     </>
                   )}
                   {nextSyncAt && (
@@ -698,31 +716,24 @@ export default function App() {
           {exporting
             ? '处理中…'
             : format === 'dms'
-              ? '一键发送到缺陷分析系统'
+              ? '发送到缺陷分析系统'
               : format === 'pdf'
                 ? withWord
-                  ? '一键导出工单Word'
-                  : '一键导出工单PDF'
-                : '一键导出'}
+                  ? '导出工单 Word'
+                  : '导出工单 PDF'
+                : '导出'}
         </button>
       )}
 
-      {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
+      {renderMessage()}
 
-      <p className="tips">
-        使用方法：在「表格」视图中勾选记录 → 选择格式 → 点击导出。Excel 可勾选内嵌缺陷图片；
-        工单PDF 可勾选导出可编辑的 Word 版工单。仅导出当前视图可见的列，数据不会离开当前页面。
-      </p>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb', marginTop: '4px' }}>
-        <span>v2.1.6</span>
-        <span>{new Date().toLocaleDateString('zh-CN')}</span>
-      </div>
+      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.7</div>
       </div>
 
       {assistantMounted && (
         <div className="assistant-body" style={{ display: tab === 'assistant' ? 'flex' : 'none' }}>
           <div className="assistant-toolbar">
-            <span className="assistant-title">设备缺陷分析助手</span>
+            <span className="assistant-title">缺陷分析助手</span>
             <button
               type="button"
               className="text-btn"
@@ -747,7 +758,7 @@ export default function App() {
             </a>
           </div>
 
-          {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
+          {renderMessage()}
 
           <iframe
             key={assistantKey}
@@ -758,8 +769,7 @@ export default function App() {
           />
 
           <p className="assistant-hint">
-            在「导出」页勾选记录 → 点上方「复制CSV」→ 点下方对话框按 Ctrl+V 粘贴 → 输入问题。
-            粘贴的是文本不是附件；内容过长时请缩小勾选范围。上方空白说明平台不允许内嵌，请点「新窗口」。
+            勾选记录 → 复制CSV → 在对话框粘贴提问；空白请点「新窗口」。
           </p>
         </div>
       )}
