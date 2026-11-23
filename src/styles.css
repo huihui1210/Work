@@ -449,6 +449,60 @@ body {
   background: #fff;
 }
 
+/* 可拖拽的 CSV 文件块 */
+.agent-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.agent-file-chip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed #3370ff;
+  border-radius: 6px;
+  background: #f0f5ff;
+  cursor: grab;
+  user-select: none;
+}
+
+.agent-file-chip:active {
+  cursor: grabbing;
+}
+
+.agent-file-badge {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #3370ff;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.agent-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #245bdb;
+}
+
+.agent-file-action {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #3370ff;
+  white-space: nowrap;
+}
+
 .assistant-hint {
   margin: 0;
   font-size: 11px;

@@ -65,6 +65,8 @@ export default function App() {
   /** 首次进入助手页后才挂载 iframe，避免不必要地请求内网地址 */
   const [assistantMounted, setAssistantMounted] = useState(false);
   const [assistantKey, setAssistantKey] = useState(0);
+  /** 已生成待拖入对话窗的 CSV 文件 */
+  const [agentFile, setAgentFile] = useState<File | null>(null);
 
   const refreshingRef = useRef(false);
   const pendingRefreshRef = useRef(false);
@@ -451,12 +453,16 @@ export default function App() {
       }
       const columns = data.columns.filter((col) => col.type !== FieldType.Attachment);
       const blob = await buildFileBlob('csv', columns, data.rows, data.viewName);
-      downloadBlob(blob, buildFilename(`${data.tableName}_${data.viewName}`, 'csv'));
+      const file = new File([blob], buildFilename(`${data.tableName}_${data.viewName}`, 'csv'), {
+        type: 'text/csv;charset=utf-8',
+      });
+      // 不直接下载，留在内存里供拖拽；需要落盘时点「下载」
+      setAgentFile(file);
       const skipNote =
         data.failedRecordCount > 0 ? `（另有 ${data.failedRecordCount} 条读取失败已跳过）` : '';
       setMessage({
         type: 'success',
-        text: `已导出 ${data.rows.length} 条记录为 CSV，把下载的文件拖进对话框即可分析。${skipNote}`,
+        text: `已生成 ${data.rows.length} 条记录的 CSV，把下方文件块直接拖进对话框即可分析。${skipNote}`,
       });
       void refresh();
     } catch (error) {
@@ -683,6 +689,33 @@ export default function App() {
             </a>
           </div>
 
+          {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
+
+          {agentFile && (
+            <div className="agent-file-row">
+              <div
+                className="agent-file-chip"
+                draggable
+                title="按住拖进对话框"
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'copy';
+                  e.dataTransfer.items.add(agentFile);
+                }}
+              >
+                <span className="agent-file-badge">CSV</span>
+                <span className="agent-file-name">{agentFile.name}</span>
+                <span className="agent-file-action">拖进对话框</span>
+              </div>
+              <button
+                type="button"
+                className="text-btn"
+                onClick={() => downloadBlob(agentFile, agentFile.name)}
+              >
+                下载
+              </button>
+            </div>
+          )}
+
           <iframe
             key={assistantKey}
             className="assistant-frame"
@@ -691,10 +724,9 @@ export default function App() {
             allow="clipboard-read; clipboard-write"
           />
 
-          {message && <div className={`banner banner-${message.type}`}>{message.text}</div>}
           <p className="assistant-hint">
-            在「导出」页勾选记录后，点上方「导出 CSV」生成文件，再把下载的文件拖进对话框即可分析。
-            如果上方空白，说明平台不允许内嵌，请点「新窗口」打开。
+            在「导出」页勾选记录 → 点上方「导出 CSV」→ 按住 CSV 文件块拖进对话框；
+            拖不进去就点「下载」，再从浏览器下载栏拖入。上方空白说明平台不允许内嵌，请点「新窗口」。
           </p>
         </div>
       )}
