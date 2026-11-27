@@ -26,6 +26,13 @@ interface FormatOption {
 const DMS_URL = 'https://huihui1210.github.io/DMS_DA/';
 /** 压缩后锚点的安全长度上限，超出则退回 Excel 下载 */
 const DMS_MAX_PAYLOAD_CHARS = 1_500_000;
+/** postMessage 专用消息类型，DMS 端需按此类型识别 */
+const DMS_MSG_TYPE = 'DMS_IMPORT_DATA';
+/** DMS 允许的 origin 集合，postMessage 时需要告知目标源 */
+const DMS_ALLOWED_ORIGINS = [
+  'https://huihui1210.github.io',
+  'http://localhost',
+];
 /** 设备缺陷分析助手分享链接（内网地址） */
 const AGENT_URL =
   'https://agents.cnooc.com.cn/share/eOzEl9oq6nZb80Yzp8yy5Bc1VhRnOdjd6exWvQ1NCGSGIyXP_aM7uA-sTCMJbK92LCrMEfUf-9PmQJ8mkLf5fQ';
@@ -144,25 +151,33 @@ export default function App() {
     return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
   };
 
-  /** 自动同步的主循环：读选中 → 压缩 → 发 hash 给 DMS
+  /** DMS 窗口是否已完成首次加载：用于决定走 postMessage 还是 URL hash */
+  const dmsReadyRef = useRef(false);
+
+  /** 自动同步的主循环：读选中 → 压缩 → 发数据给 DMS
    *  窗口策略：插件自管一个名为 dms-da-main 的 DMS 标签页。
-   *  - 已有可用引用 → 直接复用（只改 hash，不聚焦/不跳转标签页）
-   *  - 引用不存在或已关闭 → 新开一个
-   *  首次勾选时已在点击手势内同步打开窗口，后续定时同步复用该窗口。
-   *  DMS 端 checkAndRedirect 会按缺陷编号长度自动跳到正确界面。
+   *  - 首次勾选/窗口未加载 → 用 location.href 导航（DMS 监听 hashchange 自动跳转界面）
+   *  - 后续定时同步 / 窗口已加载 → 用 postMessage 发送（只更新数据，不触发 DMS 界面跳转）
+   *  这样用户在 DMS 切换到看板/报告后，自动同步不会把他踢回发送界面。
    */
   const runAutoSync = useCallback(async () => {
     const existing = dmsWindowRef.current;
-    const targetWindow =
-      existing && !existing.closed ? existing : window.open(DMS_URL, 'dms-da-main');
+    let targetWindow: Window | null = existing && !existing.closed ? existing : null;
+
+    // 窗口被关闭了 → 重新打开
     if (!targetWindow) {
-      setMessage({
-        type: 'error',
-        text: '浏览器拦截了 DMS 弹窗。请允许本页面弹出窗口后重试，或改用手动发送。',
-      });
-      return;
+      targetWindow = window.open(DMS_URL, 'dms-da-main');
+      if (!targetWindow) {
+        setMessage({
+          type: 'error',
+          text: '浏览器拦截了 DMS 弹窗。请允许本页面弹出窗口后重试，或改用手动发送。',
+        });
+        return;
+      }
+      dmsWindowRef.current = targetWindow;
+      dmsReadyRef.current = false; // 新开窗口需要先等它加载完
     }
-    dmsWindowRef.current = targetWindow;
+
     try {
       const data = await getSelectedData();
       if (data.rows.length === 0) {
@@ -187,8 +202,35 @@ export default function App() {
         });
         return;
       }
-      // 给 DMS 窗口导航到带 hash 的新地址，DMS 监听 hashchange 自动刷新
-      targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+
+      if (dmsReadyRef.current) {
+        // ✅ 窗口已就绪：用 postMessage 发数据，不改 URL、不触发 DMS 界面跳转
+        const message = {
+          type: DMS_MSG_TYPE,
+          mode: 'update',
+          compressed,
+          timestamp: Date.now(),
+        };
+        let posted = false;
+        for (const origin of DMS_ALLOWED_ORIGINS) {
+          try {
+            targetWindow.postMessage(message, origin);
+            posted = true;
+            break;
+          } catch {
+            // 某个 origin 失败就尝试下一个
+          }
+        }
+        if (!posted) {
+          // postMessage 全部失败 → 降级到 URL hash
+          targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+        }
+      } else {
+        // ⏳ 窗口刚打开 / 未就绪：用 URL hash 让 DMS 完成首次加载
+        targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+        dmsReadyRef.current = true;
+      }
+
       markSynced();
       setMessage({
         type: 'success',
@@ -299,9 +341,13 @@ export default function App() {
       // 如果已有未关闭的 DMS 窗口，复用它，避免多开标签
       if (dmsWindowRef.current && !dmsWindowRef.current.closed) {
         dmsWindow = dmsWindowRef.current;
+        dmsReadyRef.current = true; // 复用已打开窗口 → 视为已就绪
       } else {
         dmsWindow = window.open(DMS_URL, 'dms-da-main');
-        if (dmsWindow) dmsWindowRef.current = dmsWindow;
+        if (dmsWindow) {
+          dmsWindowRef.current = dmsWindow;
+          dmsReadyRef.current = false; // 新开窗口需要先通过 URL hash 完成首次加载
+        }
       }
     }
     try {
@@ -350,6 +396,7 @@ export default function App() {
         try {
           // 带数据锚点重新导航，DMS 加载时自动读取导入（沙箱无法拦截页面导航）
           dmsWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+          dmsReadyRef.current = true; // URL 导航完成 → 后续自动同步改用 postMessage
           markSynced();
           setMessage({
             type: 'success',
