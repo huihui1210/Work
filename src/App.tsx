@@ -187,12 +187,16 @@ export default function App() {
         });
         return;
       }
-      // ✅ 用相对 URL replace 保持当前页面不变！
-      // 用户可能在 DMS 的 index.html（接收站）、index_1.html（总界面）、index_2.html（分输站）、
-      // index_3.html（看板）、report.html（报告）—— 绝对 URL 会把用户强制拉回根路径默认页。
-      // replace('#dms=xxx') 是相对 URL，浏览器基于 targetWindow 当前页面解析：
-      //   pathname 保持不变，只改 hash → 只触发 hashchange、页面不重载、用户留在当前界面
-      targetWindow.location.replace('#dms=' + compressed);
+      // ✅ 跨域 iframe 里 location.replace('#xxx') 的相对 URL 基址会被解析成插件自己的 origin！
+      // 必须显式拿到 targetWindow 当前页面的 pathname，拼成完整 URL 再写 href。
+      // 跨域只读 location.pathname/search 是浏览器允许的（不泄露 origin 信息）。
+      try {
+        const curPath = targetWindow.location.pathname + targetWindow.location.search;
+        targetWindow.location.href = curPath + '#dms=' + compressed;
+      } catch {
+        // 极个别浏览器拦截读取 pathname → 降级到根路径
+        targetWindow.location.href = DMS_URL + '#dms=' + compressed;
+      }
       markSynced();
       setMessage({
         type: 'success',
@@ -731,7 +735,7 @@ export default function App() {
 
       {renderMessage()}
 
-      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.13</div>
+      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.14</div>
       </div>
 
       {assistantMounted && (
