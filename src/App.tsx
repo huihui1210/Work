@@ -28,6 +28,11 @@ const DMS_URL = 'https://huihui1210.github.io/DMS_DA/';
 const DMS_MAX_PAYLOAD_CHARS = 1_500_000;
 /** postMessage 专用消息类型，DMS 端需按此类型识别 */
 const DMS_MSG_TYPE = 'DMS_IMPORT_DATA';
+/** DMS 允许的 origin 集合，postMessage 时需要告知目标源 */
+const DMS_ALLOWED_ORIGINS = [
+  'https://huihui1210.github.io',
+  'http://localhost',
+];
 /** 设备缺陷分析助手分享链接（内网地址） */
 const AGENT_URL =
   'https://agents.cnooc.com.cn/share/eOzEl9oq6nZb80Yzp8yy5Bc1VhRnOdjd6exWvQ1NCGSGIyXP_aM7uA-sTCMJbK92LCrMEfUf-9PmQJ8mkLf5fQ';
