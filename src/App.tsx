@@ -187,10 +187,12 @@ export default function App() {
         });
         return;
       }
-      // ✅ 关键：跨域 iframe 里 location.hash setter 会被浏览器静默忽略（不抛异常！）
-      // 必须用 location.href setter 才能让目标窗口收到 hash 变化。
-      // 但不带 ?t= 时间戳（query 不变 → 浏览器只触发 hashchange、不重载页面）。
-      targetWindow.location.href = `${DMS_URL}#dms=${compressed}`;
+      // ✅ 用相对 URL replace 保持当前页面不变！
+      // 用户可能在 DMS 的 index.html（接收站）、index_1.html（总界面）、index_2.html（分输站）、
+      // index_3.html（看板）、report.html（报告）—— 绝对 URL 会把用户强制拉回根路径默认页。
+      // replace('#dms=xxx') 是相对 URL，浏览器基于 targetWindow 当前页面解析：
+      //   pathname 保持不变，只改 hash → 只触发 hashchange、页面不重载、用户留在当前界面
+      targetWindow.location.replace('#dms=' + compressed);
       markSynced();
       setMessage({
         type: 'success',
@@ -729,7 +731,7 @@ export default function App() {
 
       {renderMessage()}
 
-      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.12</div>
+      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.13</div>
       </div>
 
       {assistantMounted && (
