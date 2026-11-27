@@ -187,8 +187,17 @@ export default function App() {
         });
         return;
       }
-      // 给 DMS 窗口导航到带 hash 的新地址，DMS 监听 hashchange 自动刷新
-      targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
+      // ✅ 自动同步只改 hash，不改 query —— 避免 DMS 页面重载后跳发送界面
+      // location.hash setter 跨域仍可用（浏览器允许改 fragment，不做网络请求），
+      // 会触发 DMS 端 hashchange 监听器，页面本身不重载、用户停留在当前界面。
+      const anchor = `dms=${compressed}`;
+      try {
+        // 同 origin 时可以直接 set location.hash，更干净
+        targetWindow.location.hash = anchor;
+      } catch (_) {
+        // 极个别浏览器跨域拦截 hash setter → 降级到完整导航
+        targetWindow.location.href = `${DMS_URL}#${anchor}`;
+      }
       markSynced();
       setMessage({
         type: 'success',
@@ -727,7 +736,7 @@ export default function App() {
 
       {renderMessage()}
 
-      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.10</div>
+      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.11</div>
       </div>
 
       {assistantMounted && (
