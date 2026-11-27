@@ -153,16 +153,8 @@ export default function App() {
    */
   const runAutoSync = useCallback(async () => {
     const existing = dmsWindowRef.current;
-    const targetWindow =
-      existing && !existing.closed ? existing : window.open(DMS_URL, 'dms-da-main');
-    if (!targetWindow) {
-      setMessage({
-        type: 'error',
-        text: '浏览器拦截了 DMS 弹窗。请允许本页面弹出窗口后重试，或改用手动发送。',
-      });
-      return;
-    }
-    dmsWindowRef.current = targetWindow;
+    let targetWindow: Window | null = existing && !existing.closed ? existing : null;
+
     try {
       const data = await getSelectedData();
       if (data.rows.length === 0) {
@@ -187,16 +179,32 @@ export default function App() {
         });
         return;
       }
-      // ✅ 跨域 iframe 里 location.replace('#xxx') 的相对 URL 基址会被解析成插件自己的 origin！
-      // 必须显式拿到 targetWindow 当前页面的 pathname，拼成完整 URL 再写 href。
-      // 跨域只读 location.pathname/search 是浏览器允许的（不泄露 origin 信息）。
-      try {
-        const curPath = targetWindow.location.pathname + targetWindow.location.search;
-        targetWindow.location.href = curPath + '#dms=' + compressed;
-      } catch {
-        // 极个别浏览器拦截读取 pathname → 降级到根路径
-        targetWindow.location.href = DMS_URL + '#dms=' + compressed;
+
+      // ✅ 关键修复：第一次新开窗口时直接把带 hash 的完整 URL 作为 window.open 参数，
+      // 让 DMS 页面一加载就能从 location.hash 读到数据（DOMContentLoaded 里的 importRowsFromHash 立刻处理）。
+      // 如果先 open 空白 URL 再写 hash，DMS 还没加载完 → hashchange 监听器还没绑定 → 第一次数据丢失。
+      const hashUrl = DMS_URL + '#dms=' + compressed;
+
+      if (!targetWindow) {
+        targetWindow = window.open(hashUrl, 'dms-da-main');
+        if (!targetWindow) {
+          setMessage({
+            type: 'error',
+            text: '浏览器拦截了 DMS 弹窗。请允许本页面弹出窗口后重试，或改用手动发送。',
+          });
+          return;
+        }
+        dmsWindowRef.current = targetWindow;
+      } else {
+        // 已有窗口：尝试保持当前 pathname，失败降级到根路径
+        try {
+          const curPath = targetWindow.location.pathname + targetWindow.location.search;
+          targetWindow.location.href = curPath + '#dms=' + compressed;
+        } catch {
+          targetWindow.location.href = hashUrl;
+        }
       }
+
       markSynced();
       setMessage({
         type: 'success',
@@ -650,18 +658,9 @@ export default function App() {
                 checked={autoConfig.enabled}
                 onChange={(e) => {
                   if (e.target.checked) {
-                    // 在用户点击手势内同步打开窗口，避免被浏览器拦截；勾选后立即发送一次
-                    if (!dmsWindowRef.current || dmsWindowRef.current.closed) {
-                      const win = window.open(DMS_URL, 'dms-da-main');
-                      if (!win) {
-                        setMessage({
-                          type: 'error',
-                          text: '浏览器拦截了 DMS 弹窗，请允许本页面弹出窗口后重试。',
-                        });
-                        return;
-                      }
-                      dmsWindowRef.current = win;
-                    }
+                    // ✅ 不要提前开空白窗口！直接让 runAutoSync() 自己开带 hash 的完整 URL，
+                    // 这样 DMS 一加载就能读到 hash 里的数据，不会丢失第一次同步。
+                    // （提前开空白窗口再等 getSelectedData() 异步完成 → DMS DOMContentLoaded 已经过了 → 第一次丢数据）
                     setAutoConfig((c) => ({ ...c, enabled: true }));
                     void runAutoSync();
                   } else {
@@ -735,7 +734,7 @@ export default function App() {
 
       {renderMessage()}
 
-      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.14</div>
+      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.15</div>
       </div>
 
       {assistantMounted && (
