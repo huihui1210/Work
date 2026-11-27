@@ -211,24 +211,27 @@ export default function App() {
           compressed,
           timestamp: Date.now(),
         };
-        let posted = false;
-        for (const origin of DMS_ALLOWED_ORIGINS) {
-          try {
-            targetWindow.postMessage(message, origin);
-            posted = true;
-            break;
-          } catch {
-            // 某个 origin 失败就尝试下一个
-          }
-        }
-        if (!posted) {
-          // postMessage 全部失败 → 降级到 URL hash
+        try {
+          // ⚠️ 必须用 '*' 作为 targetOrigin！用精确 origin 时 postMessage 不匹配会静默丢弃，不抛异常
+          // DMS 端已做 event.source === window.opener 的安全校验，双保险足够
+          targetWindow.postMessage(message, '*');
+          console.log('[Work插件→DMS] postMessage 已发送，压缩数据长度:', compressed.length);
+        } catch (e) {
+          // 某些浏览器在目标窗口已关闭时可能抛异常
+          console.warn('[Work插件→DMS] postMessage 抛异常，降级到 URL hash:', e);
+          dmsReadyRef.current = false;
           targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
         }
       } else {
         // ⏳ 窗口刚打开 / 未就绪：用 URL hash 让 DMS 完成首次加载
+        console.log('[Work插件→DMS] 窗口未就绪，用 URL hash 导航');
         targetWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
-        dmsReadyRef.current = true;
+        // ❌ 不要立刻设 true！location.href 是异步的，DMS 还没加载完、没绑定 message 监听器
+        // 给 3 秒让 DMS 完成 DOMContentLoaded + 绑定 addEventListener('message', ...)
+        window.setTimeout(() => {
+          dmsReadyRef.current = true;
+          console.log('[Work插件→DMS] DMS 就绪标记已设为 true，后续定时同步将走 postMessage');
+        }, 3000);
       }
 
       markSynced();
@@ -396,7 +399,11 @@ export default function App() {
         try {
           // 带数据锚点重新导航，DMS 加载时自动读取导入（沙箱无法拦截页面导航）
           dmsWindow.location.href = `${DMS_URL}?t=${Date.now()}#dms=${compressed}`;
-          dmsReadyRef.current = true; // URL 导航完成 → 后续自动同步改用 postMessage
+          // 异步导航，延迟 3 秒后再标记就绪
+          window.setTimeout(() => {
+            dmsReadyRef.current = true;
+            console.log('[Work插件→DMS] 手动发送后，DMS 就绪标记已设为 true');
+          }, 3000);
           markSynced();
           setMessage({
             type: 'success',
