@@ -727,7 +727,7 @@ export default function App() {
 
       {renderMessage()}
 
-      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.7</div>
+      <div style={{ fontSize: '11px', color: '#bbb', marginTop: '4px' }}>v2.1.10</div>
       </div>
 
       {assistantMounted && (
